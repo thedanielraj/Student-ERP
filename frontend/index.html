@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8" />
+  <title>Aviation ERP Lite</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+
+<body>
+  <div id="loginRoot" class="login-root">
+    <div class="login-card">
+      <h1>Login</h1>
+      <p>Use your student ID or superuser</p>
+      <input id="loginUser" placeholder="Username" />
+      <input id="loginPass" type="password" placeholder="Password" />
+      <button class="btn primary" onclick="handleLogin()">Sign In</button>
+      <div id="loginError" class="login-error hidden">Invalid credentials</div>
+    </div>
+  </div>
+
+  <div id="appRoot" class="app hidden">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo">A</div>
+        <div>
+          <div class="brand-title">Student ERP</div>
+          <div class="brand-sub">Arunand's Aviation Institute</div>
+        </div>
+      </div>
+      <nav class="nav">
+        <button class="nav-item active" data-section="students">Students</button>
+        <button class="nav-item" data-section="attendance">Attendance</button>
+        <button class="nav-item" data-section="fees">Fees</button>
+        <button class="nav-item" data-section="reports">Reports</button>
+      </nav>
+      <button id="logoutBtn" class="btn logout-btn" onclick="logout()">Logout</button>
+      <div class="side-card">
+        <div class="side-card-title">Today</div>
+        <div class="side-card-row">
+          <span>Active Batches</span>
+          <strong id="batchCount">-</strong>
+        </div>
+        <div class="side-card-row">
+          <span>Students</span>
+          <strong id="studentCount">-</strong>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section id="section-students" class="section">
+        <header class="topbar">
+          <div>
+            <h1>Student Management</h1>
+            <p>Click a student to view attendance and fee status</p>
+          </div>
+          <div class="top-actions">
+            <input id="search" class="search" placeholder="Search name or ID" />
+            <button class="btn" onclick="loadStudents()">Refresh</button>
+          </div>
+        </header>
+
+        <section class="grid">
+          <div class="panel list-panel">
+            <div class="panel-header">
+              <h2>Students</h2>
+              <span class="hint">Select to open profile</span>
+            </div>
+            <ul id="studentList" class="student-list"></ul>
+          </div>
+
+          <div class="panel detail-panel">
+            <div class="panel-header">
+              <div>
+                <h2 id="detailName">Select a student</h2>
+                <div id="detailMeta" class="meta">No student selected</div>
+              </div>
+            </div>
+
+            <div class="metrics">
+              <div class="metric">
+                <div class="metric-label">Total Fee</div>
+                <div id="metricTotal" class="metric-value">-</div>
+              </div>
+              <div class="metric">
+                <div class="metric-label">Paid</div>
+                <div id="metricPaid" class="metric-value">-</div>
+              </div>
+              <div class="metric">
+                <div class="metric-label">Balance</div>
+                <div id="metricBalance" class="metric-value">-</div>
+              </div>
+              <div class="metric">
+                <div class="metric-label">Attendance</div>
+                <div id="metricAttendance" class="metric-value">-</div>
+              </div>
+            </div>
+
+            <div class="tabs">
+              <button class="tab active" data-tab="attendance">Attendance</button>
+              <button class="tab" data-tab="fees">Fees</button>
+            </div>
+
+            <div id="tab-attendance" class="tab-content">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Status</th>
+                    <th>Remarks</th>
+                  </tr>
+                </thead>
+                <tbody id="attendanceBody">
+                  <tr>
+                    <td colspan="3" class="empty">No attendance loaded</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div id="tab-fees" class="tab-content hidden">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Entry</th>
+                    <th>Total</th>
+                    <th>Paid</th>
+                    <th>Due</th>
+                    <th>Remarks</th>
+                  </tr>
+                </thead>
+                <tbody id="feesBody">
+                  <tr>
+                    <td colspan="5" class="empty">No fees loaded</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section id="addStudentPanel" class="panel add-panel">
+          <div class="panel-header">
+            <h2>Add Student</h2>
+            <span class="hint">Quick enrollment</span>
+          </div>
+          <div class="form-row">
+            <input id="name" placeholder="Student Name" />
+            <input id="course" placeholder="Course (Ground/Cabin Crew)" />
+            <input id="batch" placeholder="Batch (Mike/November/Oscar/Papa)" />
+            <button class="btn primary" onclick="addStudent()">Add Student</button>
+          </div>
+        </section>
+      </section>
+
+      <section id="section-attendance" class="section hidden">
+        <header class="topbar">
+          <div>
+            <h1 id="attendanceTitle">Attendance Overview</h1>
+            <p id="attendanceSubtitle">Date-wise attendance across all students</p>
+          </div>
+          <div class="top-actions">
+            <button class="btn" onclick="loadRecentAttendance()">Refresh</button>
+          </div>
+        </header>
+        <section id="studentWelcomePanel" class="panel hidden">
+          <div class="panel-header">
+            <h2 id="studentWelcomeTitle">Hello</h2>
+            <span class="hint">Your attendance summary</span>
+          </div>
+          <div class="attendance-hero">
+            <div class="attendance-percent">
+              <div class="attendance-percent-label">Attendance</div>
+              <div id="attendancePercentValue" class="attendance-percent-value">--%</div>
+            </div>
+            <div class="meta">
+              Welcome back. You can view your attendance records below.
+            </div>
+          </div>
+        </section>
+        <section id="takeAttendancePanel" class="panel">
+          <div class="panel-header">
+            <h2>Take Attendance</h2>
+            <span class="hint">Absent by default — toggle Present and add remarks</span>
+          </div>
+          <div class="form-row attendance-form">
+            <input id="takeDate" type="date" />
+            <button class="btn" onclick="renderTakeAttendance()">Load Students</button>
+            <button class="btn primary" onclick="submitAttendance()">Submit Attendance</button>
+          </div>
+          <div class="attendance-meta">
+            <span>Present: <strong id="presentCount">0</strong></span>
+            <span>Absent: <strong id="absentCount">0</strong></span>
+          </div>
+          <div class="attendance-list">
+            <table>
+              <thead>
+                <tr>
+                  <th>Student</th>
+                  <th>Batch</th>
+                  <th>Present</th>
+                  <th>Remarks</th>
+                </tr>
+              </thead>
+              <tbody id="takeAttendanceBody">
+                <tr>
+                  <td colspan="4" class="empty">Select a date to load students</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Attendance Overview</h2>
+            <span class="hint">Pick a date to view the list</span>
+          </div>
+          <div class="form-row attendance-form">
+            <input id="attendanceDate" type="date" />
+            <button class="btn" onclick="loadAttendanceByDate()">View Date</button>
+            <button class="btn" onclick="loadRecentAttendance()">Recent 20</button>
+            <button class="btn" onclick="syncAttendanceFromExcel()">Sync From Excel</button>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Student</th>
+                <th>Status</th>
+                <th>Remarks</th>
+              </tr>
+            </thead>
+            <tbody id="recentAttendanceBody">
+              <tr>
+                <td colspan="4" class="empty">No attendance loaded</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+      </section>
+
+      <section id="section-fees" class="section hidden">
+        <header class="topbar">
+          <div>
+            <h1 id="feesTitle">Fees Overview</h1>
+            <p id="feesSubtitle">Record fees paid for each student</p>
+          </div>
+          <div class="top-actions">
+            <button id="feesRefreshBtn" class="btn" onclick="renderFeesEntryList()">Refresh</button>
+          </div>
+        </header>
+        <section id="studentFeePanel" class="panel hidden">
+          <div class="panel-header">
+            <h2>Pay Remaining Fees</h2>
+            <span class="hint">Student view</span>
+          </div>
+          <div class="metrics">
+            <div class="metric">
+              <div class="metric-label">Remaining Amount</div>
+              <div id="studentFeeRemaining" class="metric-value">-</div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-header">
+              <h2>Payment Window</h2>
+              <span class="hint">Coming soon</span>
+            </div>
+            <div class="meta">
+              Payment methods and gateway integrations will appear here.
+            </div>
+          </div>
+        </section>
+        <section id="adminFeesPanel" class="panel">
+          <div class="panel-header">
+            <h2>Record Fees</h2>
+            <span class="hint">Upload a receipt with each payment</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Batch</th>
+                <th>Total Fee</th>
+                <th>Paid</th>
+                <th>Receipt</th>
+                <th>Remarks</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="feeEntryBody">
+              <tr>
+                <td colspan="7" class="empty">No students loaded</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+      </section>
+
+      <section id="section-reports" class="section hidden">
+        <header class="topbar">
+          <div>
+            <h1>Reports</h1>
+            <p>Snapshot of training operations</p>
+          </div>
+          <div class="top-actions">
+            <button class="btn" onclick="loadReports()">Refresh</button>
+          </div>
+        </header>
+        <section class="grid">
+          <div class="panel">
+            <div class="panel-header">
+              <h2>Totals</h2>
+            </div>
+            <div class="metrics">
+              <div class="metric">
+                <div class="metric-label">Students</div>
+                <div id="reportStudents" class="metric-value">-</div>
+              </div>
+              <div class="metric">
+                <div class="metric-label">Fees Total</div>
+                <div id="reportFeesTotal" class="metric-value">-</div>
+              </div>
+              <div class="metric">
+                <div class="metric-label">Fees Paid</div>
+                <div id="reportFeesPaid" class="metric-value">-</div>
+              </div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-header">
+              <h2>Attendance</h2>
+            </div>
+            <div class="metrics">
+              <div class="metric">
+                <div class="metric-label">Present</div>
+                <div id="reportPresent" class="metric-value">-</div>
+              </div>
+              <div class="metric">
+                <div class="metric-label">Absent</div>
+                <div id="reportAbsent" class="metric-value">-</div>
+              </div>
+              <div class="metric">
+                <div class="metric-label">Balance Due</div>
+                <div id="reportBalance" class="metric-value">-</div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+
+</html>
