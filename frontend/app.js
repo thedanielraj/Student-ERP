@@ -1,9 +1,14 @@
-const API = "http://127.0.0.1:8000";
+const LOCAL_FASTAPI_HOSTS = ["127.0.0.1:8000", "localhost:8000"];
+const API = LOCAL_FASTAPI_HOSTS.includes(window.location.host)
+  ? window.location.origin
+  : `${window.location.origin}/api`;
 const TOKEN_KEY = "authToken";
 
 let allStudents = [];
 let selectedId = null;
 let authInfo = null;
+let studentFeeSummary = null;
+let razorpayKeyId = null;
 
 async function loadStudents() {
   const res = await authFetch(`${API}/students`);
@@ -115,7 +120,7 @@ async function loadAttendance(studentId) {
   rows.forEach(r => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${r.date || "-"}</td>
+      <td>${formatDateDDMMYYYY(r.date || "-")}</td>
       <td>${r.attendance_status || "-"}</td>
       <td>${r.remarks || ""}</td>
     `;
@@ -204,6 +209,22 @@ function switchSection(target) {
   }
   if (target === "fees") {
     renderFeesEntryList();
+    loadFeeSummary();
+  }
+  if (target === "feed") {
+    loadFeed();
+  }
+  if (target === "timetable") {
+    loadTimetable();
+  }
+  if (target === "interviews") {
+    loadInterviews();
+  }
+  if (target === "announcements") {
+    loadAnnouncements();
+  }
+  if (target === "notifications") {
+    loadNotifications();
   }
 }
 
@@ -221,7 +242,7 @@ async function loadRecentAttendance() {
   rows.forEach(r => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${r.date || "-"}</td>
+      <td>${formatDateDDMMYYYY(r.date || "-")}</td>
       <td>${r.student_name || r.student_id}</td>
       <td>${r.attendance_status || "-"}</td>
       <td>${r.remarks || ""}</td>
@@ -253,7 +274,7 @@ async function loadAttendanceByDate() {
   rows.forEach(r => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${r.date || "-"}</td>
+      <td>${formatDateDDMMYYYY(r.date || "-")}</td>
       <td>${r.student_name || r.student_id}</td>
       <td>${r.attendance_status || "-"}</td>
       <td>${r.remarks || ""}</td>
@@ -267,7 +288,16 @@ async function loadAttendanceByDate() {
 }
 
 async function syncAttendanceFromExcel() {
-  const res = await authFetch(`${API}/attendance/sync`, { method: "POST" });
+  const fileInput = document.getElementById("attendanceSyncFile");
+  const file = fileInput?.files?.[0];
+  let res;
+  if (file) {
+    const form = new FormData();
+    form.append("file", file);
+    res = await authFetch(`${API}/attendance/sync/upload`, { method: "POST", body: form });
+  } else {
+    res = await authFetch(`${API}/attendance/sync`, { method: "POST" });
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     alert(err.detail || "Failed to sync from Excel.");
@@ -275,7 +305,8 @@ async function syncAttendanceFromExcel() {
   }
   const data = await res.json().catch(() => ({}));
   await loadRecentAttendance();
-  alert(`Synced from Excel. Inserted: ${data.inserted ?? 0}, Skipped: ${data.skipped ?? 0}`);
+  if (fileInput) fileInput.value = "";
+  alert(`${data.message || "Sync complete"}. Inserted: ${data.inserted ?? 0}, Skipped: ${data.skipped ?? 0}`);
 }
 
 async function loadRecentFees() {
@@ -385,6 +416,257 @@ async function loadReports() {
   document.getElementById("reportAbsent").textContent = data.attendance_absent ?? "-";
 }
 
+async function loadFeeSummary() {
+  const res = await authFetch(`${API}/fees/summary`);
+  if (!res.ok) return;
+  const data = await res.json();
+  const total = document.getElementById("feeSummaryTotal");
+  const due = document.getElementById("feeSummaryDue");
+  const txns = document.getElementById("feeSummaryTransactions");
+  if (total) total.textContent = formatMoney(data.total);
+  if (due) due.textContent = formatMoney(data.due);
+  if (txns) txns.textContent = String(data.transactions ?? 0);
+  const gatewayRes = await authFetch(`${API}/payments/gateway-status`);
+  if (gatewayRes.ok) {
+    const gateway = await gatewayRes.json();
+    const gatewayEl = document.getElementById("paymentGatewayInfo");
+    if (gatewayEl) gatewayEl.textContent = `Payment gateway: ${gateway.message}`;
+    razorpayKeyId = gateway.key_id || null;
+  }
+}
+
+async function loadFeed() {
+  const res = await authFetch(`${API}/feed`);
+  if (!res.ok) return;
+  const data = await res.json();
+
+  setText("feedFeesTotal", formatMoney(data.fees?.total));
+  setText("feedFeesDue", formatMoney(data.fees?.due));
+  setText("feedFeesTxn", String(data.fees?.transactions ?? 0));
+
+  renderSimpleList(
+    "feedInterviews",
+    (data.interviews || []).map(i => `${i.airline_name} • ${formatDateDDMMYYYY(i.interview_date)} • ${i.student_name || "N/A"}`),
+    "No interviews"
+  );
+  renderSimpleList("feedAnnouncements", (data.announcements || []).map(a => `${a.title} • ${a.message}`), "No announcements");
+  renderSimpleList("feedNotifications", (data.notifications || []).map(n => `${n.title} • ${n.message}`), "No notifications");
+}
+
+async function loadTimetable() {
+  const res = await authFetch(`${API}/timetable`);
+  if (!res.ok) return;
+  const rows = await res.json();
+  const body = document.getElementById("timetableBody");
+  body.innerHTML = "";
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="7" class="empty">No timetable entries</td></tr>`;
+    return;
+  }
+  rows.forEach(r => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${r.day_of_week}</td><td>${r.start_time} - ${r.end_time}</td><td>${r.title}</td><td>${r.course || "-"}</td><td>${r.batch || "-"}</td><td>${r.location || "-"}</td><td>${r.instructor || "-"}</td>`;
+    body.appendChild(tr);
+  });
+}
+
+async function addTimetable() {
+  const payload = {
+    title: value("ttTitle"),
+    day_of_week: value("ttDay"),
+    start_time: value("ttStart"),
+    end_time: value("ttEnd"),
+    course: value("ttCourse"),
+    batch: value("ttBatch"),
+    location: value("ttLocation"),
+    instructor: value("ttInstructor"),
+  };
+  if (!payload.title || !payload.day_of_week || !payload.start_time || !payload.end_time) {
+    alert("Title, day, start, and end time are required.");
+    return;
+  }
+  const res = await authFetch(`${API}/timetable`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    alert("Failed to add timetable entry.");
+    return;
+  }
+  clearInputs(["ttTitle", "ttDay", "ttStart", "ttEnd", "ttCourse", "ttBatch", "ttLocation", "ttInstructor"]);
+  loadTimetable();
+}
+
+async function loadInterviews() {
+  const res = await authFetch(`${API}/interviews`);
+  if (!res.ok) return;
+  const rows = await res.json();
+  const body = document.getElementById("interviewBody");
+  body.innerHTML = "";
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="4" class="empty">No interview records</td></tr>`;
+    return;
+  }
+  rows.forEach(r => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${r.student_name || "-"}</td><td>${r.airline_name}</td><td>${formatDateDDMMYYYY(r.interview_date)}</td><td>${r.notes || ""}</td>`;
+    body.appendChild(tr);
+  });
+}
+
+async function addInterview() {
+  const payload = {
+    airline_name: value("ivAirline"),
+    interview_date: value("ivDate"),
+    notes: value("ivNotes"),
+  };
+  if (!payload.airline_name || !payload.interview_date) {
+    alert("Airline and date are required.");
+    return;
+  }
+  const res = await authFetch(`${API}/interviews`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    alert("Failed to add interview.");
+    return;
+  }
+  clearInputs(["ivAirline", "ivDate", "ivNotes"]);
+  loadInterviews();
+}
+
+async function loadAnnouncements() {
+  const res = await authFetch(`${API}/announcements`);
+  if (!res.ok) return;
+  const rows = await res.json();
+  renderSimpleList("announcementList", rows.map(a => `${a.title} • ${a.message}`), "No announcements");
+}
+
+async function addAnnouncement() {
+  const payload = { title: value("anTitle"), message: value("anMessage") };
+  if (!payload.title || !payload.message) {
+    alert("Title and message are required.");
+    return;
+  }
+  const res = await authFetch(`${API}/announcements`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    alert("Failed to create announcement.");
+    return;
+  }
+  clearInputs(["anTitle", "anMessage"]);
+  loadAnnouncements();
+}
+
+async function loadNotifications() {
+  const res = await authFetch(`${API}/notifications`);
+  if (!res.ok) return;
+  const rows = await res.json();
+  const list = document.getElementById("notificationList");
+  list.innerHTML = "";
+  if (!rows.length) {
+    list.innerHTML = `<li class="student-item"><strong>No notifications</strong></li>`;
+    return;
+  }
+  rows.forEach(n => {
+    const li = document.createElement("li");
+    li.className = "student-item";
+    li.innerHTML = `<div><strong>${n.title}</strong> ${n.is_read ? "" : "<span class='hint'>(new)</span>"}</div><div class="student-meta">${n.message}</div>`;
+    if (!n.is_read) {
+      const btn = document.createElement("button");
+      btn.className = "btn";
+      btn.textContent = "Mark Read";
+      btn.onclick = async () => {
+        await authFetch(`${API}/notifications/${n.notification_id}/read`, { method: "POST" });
+        loadNotifications();
+      };
+      li.appendChild(btn);
+    }
+    list.appendChild(li);
+  });
+}
+
+async function addNotification() {
+  const payload = {
+    title: value("ntTitle"),
+    message: value("ntMessage"),
+    target_user: value("ntTarget") || null,
+    level: "info",
+  };
+  if (!payload.title || !payload.message) {
+    alert("Title and message are required.");
+    return;
+  }
+  const res = await authFetch(`${API}/notifications`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    alert("Failed to create notification.");
+    return;
+  }
+  clearInputs(["ntTitle", "ntMessage", "ntTarget"]);
+  loadNotifications();
+}
+
+function renderSimpleList(id, items, emptyText) {
+  const list = document.getElementById(id);
+  if (!list) return;
+  list.innerHTML = "";
+  if (!items.length) {
+    list.innerHTML = `<li class="student-item"><strong>${emptyText}</strong></li>`;
+    return;
+  }
+  items.forEach(text => {
+    const li = document.createElement("li");
+    li.className = "student-item";
+    li.textContent = text;
+    list.appendChild(li);
+  });
+}
+
+function value(id) {
+  return (document.getElementById(id)?.value || "").trim();
+}
+
+function clearInputs(ids) {
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
+}
+
+function setText(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+
+function formatDateDDMMYYYY(value) {
+  const s = String(value || "").trim();
+  if (!s) return "-";
+  // yyyy-mm-dd -> dd-mm-yyyy
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y, m, d] = s.split("-");
+    return `${d}-${m}-${y}`;
+  }
+  // ddmmyyyy -> dd-mm-yyyy
+  if (/^\d{8}$/.test(s)) {
+    return `${s.slice(0, 2)}-${s.slice(2, 4)}-${s.slice(4, 8)}`;
+  }
+  // already dd-mm-yyyy
+  if (/^\d{2}-\d{2}-\d{4}$/.test(s)) {
+    return s;
+  }
+  return s;
+}
+
 function ensureTakeDate() {
   const input = document.getElementById("takeDate");
   if (!input.value) {
@@ -492,7 +774,7 @@ async function submitAttendance() {
       student_name: s.student_name,
       course: s.course,
       batch: s.batch,
-      attendance_status: isPresent ? "Present" : "Absent",
+      attendance_status: isPresent ? "P" : "A",
       remarks: remark.trim()
     };
   });
@@ -542,6 +824,12 @@ async function initAuth() {
 function afterLoginInit() {
   loadStudents();
   loadRecentAttendance();
+  loadFeed();
+  loadTimetable();
+  loadInterviews();
+  loadAnnouncements();
+  loadNotifications();
+  loadFeeSummary();
   if (authInfo && authInfo.role === "superuser") {
     loadRecentFees();
     loadReports();
@@ -645,6 +933,14 @@ function applyRoleUI() {
   if (studentFees) studentFees.classList.toggle("hidden", !isStudent);
   const addStudentPanel = document.getElementById("addStudentPanel");
   if (addStudentPanel) addStudentPanel.classList.toggle("hidden", isStudent);
+  const adminTimetablePanel = document.getElementById("adminTimetablePanel");
+  if (adminTimetablePanel) adminTimetablePanel.classList.toggle("hidden", isStudent);
+  const adminInterviewPanel = document.getElementById("adminInterviewPanel");
+  if (adminInterviewPanel) adminInterviewPanel.classList.toggle("hidden", isStudent);
+  const adminAnnouncementPanel = document.getElementById("adminAnnouncementPanel");
+  if (adminAnnouncementPanel) adminAnnouncementPanel.classList.toggle("hidden", isStudent);
+  const adminNotificationPanel = document.getElementById("adminNotificationPanel");
+  if (adminNotificationPanel) adminNotificationPanel.classList.toggle("hidden", isStudent);
 
   const feesTitle = document.getElementById("feesTitle");
   const feesSubtitle = document.getElementById("feesSubtitle");
@@ -671,9 +967,182 @@ async function loadStudentFeeSummary() {
   const res = await authFetch(`${API}/students/${encodeURIComponent(authInfo.user)}/balance`);
   if (!res.ok) return;
   const data = await res.json();
+  studentFeeSummary = data;
   const remaining = Number(data.balance || 0);
   const el = document.getElementById("studentFeeRemaining");
   if (el) {
     el.textContent = formatMoney(remaining);
   }
+  setText("studentFeeCourse", data.course || "-");
+  setText("studentFeeTotal", formatMoney(data.total));
+  setText("studentFeePaid", formatMoney(data.paid));
+
+  const gatewayRes = await authFetch(`${API}/payments/gateway-status`);
+  if (gatewayRes.ok) {
+    const gateway = await gatewayRes.json();
+    razorpayKeyId = gateway.key_id || null;
+    const statusEl = document.getElementById("studentGatewayStatus");
+    const payBtn = document.getElementById("payNowBtn");
+    if (statusEl) {
+      statusEl.textContent = gateway.enabled
+        ? "Secure payments powered by Razorpay."
+        : "Payment gateway is currently unavailable.";
+    }
+    if (payBtn) {
+      payBtn.classList.toggle("hidden", !(gateway.enabled && remaining > 0));
+    }
+  }
+}
+
+async function payNowRazorpay() {
+  if (!authInfo || authInfo.role !== "student") return;
+  if (!studentFeeSummary || Number(studentFeeSummary.balance || 0) <= 0) {
+    alert("No due amount to pay.");
+    return;
+  }
+  if (!razorpayKeyId || typeof Razorpay === "undefined") {
+    alert("Razorpay is not available right now.");
+    return;
+  }
+
+  const orderRes = await authFetch(`${API}/payments/razorpay/order`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ student_id: authInfo.user })
+  });
+  if (!orderRes.ok) {
+    const err = await orderRes.json().catch(() => ({}));
+    alert(err.detail || "Failed to create payment order.");
+    return;
+  }
+  const orderData = await orderRes.json();
+  const order = orderData.order || {};
+
+  const options = {
+    key: orderData.key_id,
+    amount: order.amount,
+    currency: order.currency || "INR",
+    name: "Arunand's Aviation Institute",
+    description: "Fee Payment",
+    order_id: order.id,
+    prefill: {
+      name: authInfo.student_name || authInfo.first_name || "Student",
+    },
+    notes: order.notes || {},
+    handler: async function (response) {
+      const verifyRes = await authFetch(`${API}/payments/razorpay/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          student_id: authInfo.user,
+          razorpay_payment_id: response.razorpay_payment_id,
+          razorpay_order_id: response.razorpay_order_id,
+          razorpay_signature: response.razorpay_signature,
+          amount_paid_inr: (order.amount || 0) / 100
+        })
+      });
+      if (!verifyRes.ok) {
+        const err = await verifyRes.json().catch(() => ({}));
+        alert(err.detail || "Payment verification failed.");
+        return;
+      }
+      const verifyData = await verifyRes.json().catch(() => ({}));
+      if (verifyData.invoice) {
+        await downloadInvoicePdf(verifyData.invoice);
+      }
+      alert("Payment successful and recorded.");
+      await loadStudentFeeSummary();
+      await loadFeeSummary();
+      await loadRecentFees();
+    },
+    theme: { color: "#0f5ea9" }
+  };
+
+  const rzp = new Razorpay(options);
+  rzp.open();
+}
+
+async function downloadInvoicePdf(invoice) {
+  if (!window.PDFLib) return;
+  const { PDFDocument, rgb, StandardFonts } = window.PDFLib;
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595, 842]);
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+  page.drawRectangle({
+    x: 30,
+    y: 30,
+    width: 535,
+    height: 782,
+    borderColor: rgb(0.06, 0.27, 0.5),
+    borderWidth: 1.2,
+  });
+
+  try {
+    const logoRes = await fetch("/assets/logo.png");
+    const logoBytes = await logoRes.arrayBuffer();
+    const logo = await pdfDoc.embedPng(logoBytes);
+    const maxW = 150;
+    const scale = maxW / logo.width;
+    page.drawImage(logo, {
+      x: 42,
+      y: 730,
+      width: logo.width * scale,
+      height: logo.height * scale,
+    });
+  } catch (_) {
+    // If logo is unavailable, invoice still downloads.
+  }
+
+  page.drawText("Fee Payment Invoice", {
+    x: 42,
+    y: 700,
+    size: 20,
+    font: fontBold,
+    color: rgb(0.06, 0.27, 0.5),
+  });
+
+  const lines = [
+    ["Invoice No", invoice.invoice_no || "-"],
+    ["Date", formatDateDDMMYYYY(invoice.date || "")],
+    ["Student ID", invoice.student_id || "-"],
+    ["Student Name", invoice.student_name || "-"],
+    ["Course", invoice.course || "-"],
+    ["Payment ID", invoice.payment_id || "-"],
+    ["Order ID", invoice.order_id || "-"],
+    ["Amount Paid", `INR ${formatMoney(invoice.amount_paid || 0)}`],
+    ["Total Fee", `INR ${formatMoney(invoice.amount_total || 0)}`],
+    ["Remaining", `INR ${formatMoney(invoice.balance_due || 0)}`],
+  ];
+
+  let y = 650;
+  for (const [k, v] of lines) {
+    page.drawText(`${k}:`, { x: 42, y, size: 12, font: fontBold, color: rgb(0.15, 0.2, 0.3) });
+    page.drawText(String(v), { x: 180, y, size: 12, font, color: rgb(0.08, 0.08, 0.08) });
+    y -= 28;
+  }
+
+  page.drawText("Arunand's Aviation Institute", {
+    x: 42,
+    y: 80,
+    size: 11,
+    font: fontBold,
+    color: rgb(0.06, 0.27, 0.5),
+  });
+  page.drawText("Thank you for your payment.", {
+    x: 42,
+    y: 62,
+    size: 10,
+    font,
+    color: rgb(0.3, 0.35, 0.45),
+  });
+
+  const bytes = await pdfDoc.save();
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `${invoice.invoice_no || "invoice"}.pdf`;
+  link.click();
+  URL.revokeObjectURL(link.href);
 }

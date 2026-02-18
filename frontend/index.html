@@ -3,13 +3,17 @@
 
 <head>
   <meta charset="UTF-8" />
-  <title>Aviation ERP Lite</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Arunand's Aviation ERP</title>
+  <link rel="stylesheet" href="/style.css" />
 </head>
 
 <body>
   <div id="loginRoot" class="login-root">
     <div class="login-card">
+      <div class="brand-mark">
+        <img src="/assets/logo.png" alt="Arunand's Aviation Institute" class="logo-img" />
+      </div>
       <h1>Login</h1>
       <p>Use your student ID or superuser</p>
       <input id="loginUser" placeholder="Username" />
@@ -22,16 +26,23 @@
   <div id="appRoot" class="app hidden">
     <aside class="sidebar">
       <div class="brand">
-        <div class="logo">A</div>
+        <div class="logo-wrap">
+          <img src="/assets/logo.png" alt="AAI" class="logo-img" />
+        </div>
         <div>
-          <div class="brand-title">Student ERP</div>
+          <div class="brand-title">Arunand's ERP</div>
           <div class="brand-sub">Arunand's Aviation Institute</div>
         </div>
       </div>
       <nav class="nav">
+        <button class="nav-item" data-section="feed">Feed</button>
         <button class="nav-item active" data-section="students">Students</button>
         <button class="nav-item" data-section="attendance">Attendance</button>
         <button class="nav-item" data-section="fees">Fees</button>
+        <button class="nav-item" data-section="timetable">Timetable</button>
+        <button class="nav-item" data-section="interviews">Interviews</button>
+        <button class="nav-item" data-section="announcements">Announcements</button>
+        <button class="nav-item" data-section="notifications">Notifications</button>
         <button class="nav-item" data-section="reports">Reports</button>
       </nav>
       <button id="logoutBtn" class="btn logout-btn" onclick="logout()">Logout</button>
@@ -214,13 +225,12 @@
         <section class="panel">
           <div class="panel-header">
             <h2>Attendance Overview</h2>
-            <span class="hint">Pick a date to view the list</span>
+            <span class="hint">Pick a date to view the list (online D1 data)</span>
           </div>
           <div class="form-row attendance-form">
             <input id="attendanceDate" type="date" />
             <button class="btn" onclick="loadAttendanceByDate()">View Date</button>
             <button class="btn" onclick="loadRecentAttendance()">Recent 20</button>
-            <button class="btn" onclick="syncAttendanceFromExcel()">Sync From Excel</button>
           </div>
           <table>
             <thead>
@@ -257,6 +267,18 @@
           </div>
           <div class="metrics">
             <div class="metric">
+              <div class="metric-label">Course</div>
+              <div id="studentFeeCourse" class="metric-value">-</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">Total Fee</div>
+              <div id="studentFeeTotal" class="metric-value">-</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">Paid</div>
+              <div id="studentFeePaid" class="metric-value">-</div>
+            </div>
+            <div class="metric">
               <div class="metric-label">Remaining Amount</div>
               <div id="studentFeeRemaining" class="metric-value">-</div>
             </div>
@@ -264,12 +286,34 @@
           <div class="panel">
             <div class="panel-header">
               <h2>Payment Window</h2>
-              <span class="hint">Coming soon</span>
+              <span class="hint">Razorpay</span>
             </div>
             <div class="meta">
-              Payment methods and gateway integrations will appear here.
+              <div id="studentGatewayStatus">Checking payment gateway...</div>
+              <button id="payNowBtn" class="btn primary hidden" onclick="payNowRazorpay()">Pay Now</button>
             </div>
           </div>
+        </section>
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Fee Summary</h2>
+            <span class="hint">Total, due, and transactions</span>
+          </div>
+          <div class="metrics">
+            <div class="metric">
+              <div class="metric-label">Total</div>
+              <div id="feeSummaryTotal" class="metric-value">-</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">Due</div>
+              <div id="feeSummaryDue" class="metric-value">-</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">Transactions</div>
+              <div id="feeSummaryTransactions" class="metric-value">-</div>
+            </div>
+          </div>
+          <div class="meta" id="paymentGatewayInfo">Payment gateway: coming soon</div>
         </section>
         <section id="adminFeesPanel" class="panel">
           <div class="panel-header">
@@ -294,6 +338,152 @@
               </tr>
             </tbody>
           </table>
+        </section>
+      </section>
+
+      <section id="section-feed" class="section hidden">
+        <header class="topbar">
+          <div>
+            <h1>Feed</h1>
+            <p>Live summary of fees, interviews, announcements, and notifications</p>
+          </div>
+          <div class="top-actions">
+            <button class="btn" onclick="loadFeed()">Refresh</button>
+          </div>
+        </header>
+        <section class="grid">
+          <div class="panel">
+            <div class="panel-header"><h2>Fees</h2></div>
+            <div class="metrics">
+              <div class="metric"><div class="metric-label">Total</div><div id="feedFeesTotal" class="metric-value">-</div></div>
+              <div class="metric"><div class="metric-label">Due</div><div id="feedFeesDue" class="metric-value">-</div></div>
+              <div class="metric"><div class="metric-label">Transactions</div><div id="feedFeesTxn" class="metric-value">-</div></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><h2>Interviews</h2></div>
+            <ul id="feedInterviews" class="student-list"></ul>
+          </div>
+        </section>
+        <section class="grid">
+          <div class="panel">
+            <div class="panel-header"><h2>Announcements</h2></div>
+            <ul id="feedAnnouncements" class="student-list"></ul>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><h2>Notifications</h2></div>
+            <ul id="feedNotifications" class="student-list"></ul>
+          </div>
+        </section>
+      </section>
+
+      <section id="section-timetable" class="section hidden">
+        <header class="topbar">
+          <div>
+            <h1>Timetable</h1>
+            <p>Class schedules by day and batch</p>
+          </div>
+          <div class="top-actions">
+            <button class="btn" onclick="loadTimetable()">Refresh</button>
+          </div>
+        </header>
+        <section id="adminTimetablePanel" class="panel">
+          <div class="panel-header">
+            <h2>Add Timetable Entry</h2>
+          </div>
+          <div class="form-row">
+            <input id="ttTitle" placeholder="Title (e.g., Ground Ops)" />
+            <input id="ttDay" placeholder="Day (Mon/Tue/...)" />
+            <input id="ttStart" placeholder="Start (09:00)" />
+            <input id="ttEnd" placeholder="End (10:30)" />
+            <input id="ttCourse" placeholder="Course" />
+            <input id="ttBatch" placeholder="Batch" />
+            <input id="ttLocation" placeholder="Location" />
+            <input id="ttInstructor" placeholder="Instructor" />
+            <button class="btn primary" onclick="addTimetable()">Add</button>
+          </div>
+        </section>
+        <section class="panel">
+          <table>
+            <thead>
+              <tr><th>Day</th><th>Time</th><th>Title</th><th>Course</th><th>Batch</th><th>Location</th><th>Instructor</th></tr>
+            </thead>
+            <tbody id="timetableBody"><tr><td colspan="7" class="empty">No timetable entries</td></tr></tbody>
+          </table>
+        </section>
+      </section>
+
+      <section id="section-interviews" class="section hidden">
+        <header class="topbar">
+          <div>
+            <h1>Interview Stats</h1>
+            <p>Airline interview tracking</p>
+          </div>
+          <div class="top-actions">
+            <button class="btn" onclick="loadInterviews()">Refresh</button>
+          </div>
+        </header>
+        <section id="adminInterviewPanel" class="panel">
+          <div class="panel-header"><h2>Add Interview Record</h2></div>
+          <div class="form-row">
+            <input id="ivAirline" placeholder="Airline Name" />
+            <input id="ivDate" type="date" />
+            <input id="ivNotes" placeholder="Notes" />
+            <button class="btn primary" onclick="addInterview()">Add</button>
+          </div>
+        </section>
+        <section class="panel">
+          <table>
+            <thead><tr><th>Student</th><th>Airline</th><th>Date</th><th>Notes</th></tr></thead>
+            <tbody id="interviewBody"><tr><td colspan="4" class="empty">No interview records</td></tr></tbody>
+          </table>
+        </section>
+      </section>
+
+      <section id="section-announcements" class="section hidden">
+        <header class="topbar">
+          <div>
+            <h1>Announcements</h1>
+            <p>Institute-wide updates</p>
+          </div>
+          <div class="top-actions">
+            <button class="btn" onclick="loadAnnouncements()">Refresh</button>
+          </div>
+        </header>
+        <section id="adminAnnouncementPanel" class="panel">
+          <div class="panel-header"><h2>Post Announcement</h2></div>
+          <div class="form-row">
+            <input id="anTitle" placeholder="Title" />
+            <input id="anMessage" placeholder="Message" />
+            <button class="btn primary" onclick="addAnnouncement()">Post</button>
+          </div>
+        </section>
+        <section class="panel">
+          <ul id="announcementList" class="student-list"></ul>
+        </section>
+      </section>
+
+      <section id="section-notifications" class="section hidden">
+        <header class="topbar">
+          <div>
+            <h1>Notifications</h1>
+            <p>Personal and broadcast notifications</p>
+          </div>
+          <div class="top-actions">
+            <button class="btn" onclick="loadNotifications()">Refresh</button>
+          </div>
+        </header>
+        <section id="adminNotificationPanel" class="panel">
+          <div class="panel-header"><h2>Create Notification</h2></div>
+          <div class="form-row">
+            <input id="ntTitle" placeholder="Title" />
+            <input id="ntMessage" placeholder="Message" />
+            <input id="ntTarget" placeholder="Target user (optional)" />
+            <button class="btn primary" onclick="addNotification()">Send</button>
+          </div>
+        </section>
+        <section class="panel">
+          <ul id="notificationList" class="student-list"></ul>
         </section>
       </section>
 
@@ -351,7 +541,9 @@
     </main>
   </div>
 
-  <script src="/static/app.js"></script>
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdf-lib/dist/pdf-lib.min.js"></script>
+  <script src="/app.js"></script>
 </body>
 
 </html>
