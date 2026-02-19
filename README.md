@@ -150,10 +150,10 @@ pytest -q
 ![Superuser Dashboard](docs/screenshots/superuser-dashboard.png)
 
 ### Attendance Tab
-![Attendance Tab](docs/screenshots/attendance-tab.svg)
+![Attendance Tab](docs/screenshots/attendance-tab.png)
 
 ### Student View
-![Student View](docs/screenshots/student-view.svg)
+![Student View](docs/screenshots/student-view.png)
 
 These are starter placeholders so the README renders visually. Replace them with real screenshots when ready.
 
