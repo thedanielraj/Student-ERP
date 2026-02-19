@@ -147,7 +147,7 @@ pytest -q
 ![Login](docs/screenshots/login.png)
 
 ### Superuser Dashboard
-![Superuser Dashboard](docs/screenshots/superuser-dashboard.svg)
+![Superuser Dashboard](docs/screenshots/superuser-dashboard.png)
 
 ### Attendance Tab
 ![Attendance Tab](docs/screenshots/attendance-tab.svg)
