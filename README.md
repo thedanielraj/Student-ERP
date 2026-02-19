@@ -9,8 +9,12 @@
   <img alt="Backend" src="https://img.shields.io/badge/Backend-FastAPI-0f766e">
   <img alt="Database" src="https://img.shields.io/badge/Database-SQLite-1d4ed8">
   <img alt="Frontend" src="https://img.shields.io/badge/Frontend-HTML%2FCSS%2FJS-1f2937">
-  <img alt="Status" src="https://img.shields.io/badge/Status-Local%20Ready-16a34a">
+  <img alt="Status" src="https://img.shields.io/badge/Status-Live%20on%20Cloudflare-16a34a">
 </p>
+
+## Live URL
+
+- https://student-erp.pages.dev
 
 ## What Is This?
 
