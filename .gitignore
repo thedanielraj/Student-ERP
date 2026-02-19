@@ -26,8 +26,7 @@ Thumbs.db
 
 # Environment files
 .env
-<<<<<<< HEAD
 .env.*
-=======
-.env.*
->>>>>>> 0916b29 (Initial Student ERP upload)
+
+# Cloudflare local state
+.wrangler/

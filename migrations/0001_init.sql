@@ -1,7 +1,7 @@
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS students (
-    student_id TEXT PRIMARY KEY ,
+    student_id TEXT PRIMARY KEY,
     student_name TEXT NOT NULL,
     course TEXT NOT NULL,
     batch TEXT NOT NULL,
@@ -17,8 +17,10 @@ CREATE TABLE IF NOT EXISTS fees (
     due_date TEXT,
     remarks TEXT,
     receipt_path TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (student_id) REFERENCES students(student_id) ON DELETE CASCADE
 );
+
 CREATE TABLE IF NOT EXISTS attendance (
     attendance_id INTEGER PRIMARY KEY AUTOINCREMENT,
     student_id TEXT NOT NULL,
@@ -28,6 +30,7 @@ CREATE TABLE IF NOT EXISTS attendance (
     date TEXT NOT NULL,
     attendance_status TEXT NOT NULL,
     remarks TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(student_id, date),
     FOREIGN KEY (student_id) REFERENCES students(student_id) ON DELETE CASCADE
 );
@@ -76,4 +79,17 @@ CREATE TABLE IF NOT EXISTS notification_reads (
     read_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (notification_id, user_id),
     FOREIGN KEY (notification_id) REFERENCES notifications(notification_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS credentials (
+    username TEXT PRIMARY KEY,
+    password TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'student',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    expires_at INTEGER NOT NULL
 );

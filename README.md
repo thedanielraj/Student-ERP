@@ -49,7 +49,13 @@ It helps you:
 ### 1. Install dependencies
 
 ```bash
-pip install fastapi uvicorn pandas openpyxl python-multipart
+pip install -r requirements.txt
+```
+
+For development and tests:
+
+```bash
+pip install -r requirements-dev.txt
 ```
 
 ### 2. Start backend
@@ -113,6 +119,14 @@ aviation_erp/
 - `GET /fees/recent`
 - `GET /reports/summary`
 
+## Tests
+
+Run backend tests with:
+
+```bash
+pytest -q
+```
+
 ## Attendance and Excel Behavior
 
 - Attendance recorded in UI is saved to:
@@ -125,27 +139,19 @@ aviation_erp/
 
 ## Screenshots
 
-Add images to:
-- `docs/screenshots/login.png`
-- `docs/screenshots/superuser-dashboard.png`
-- `docs/screenshots/attendance-tab.png`
-- `docs/screenshots/student-view.png`
-
-Then render them in README:
-
-```md
 ### Login
-![Login](docs/screenshots/login.png)
+![Login](docs/screenshots/login.svg)
 
 ### Superuser Dashboard
-![Superuser Dashboard](docs/screenshots/superuser-dashboard.png)
+![Superuser Dashboard](docs/screenshots/superuser-dashboard.svg)
 
 ### Attendance Tab
-![Attendance Tab](docs/screenshots/attendance-tab.png)
+![Attendance Tab](docs/screenshots/attendance-tab.svg)
 
 ### Student View
-![Student View](docs/screenshots/student-view.png)
-```
+![Student View](docs/screenshots/student-view.svg)
+
+These are starter placeholders so the README renders visually. Replace them with real screenshots when ready.
 
 ## Production Notes
 
@@ -154,3 +160,62 @@ Current auth/session setup is suitable for local/internal usage. For production:
 - use a stronger session strategy (JWT or persistent session store),
 - tighten CORS policy,
 - enforce HTTPS and secure cookie handling.
+
+## Cloudflare Pages Deployment (Free Tier)
+
+This repo now includes:
+- Pages Functions API: `functions/api/[[path]].js`
+- D1 migration: `migrations/0001_init.sql`
+- Wrangler config: `wrangler.toml`
+
+### 1. Install and login
+
+```bash
+npm install -g wrangler
+wrangler login
+```
+
+### 2. Create D1 and R2
+
+```bash
+wrangler d1 create student-erp-db
+wrangler r2 bucket create student-erp-files
+```
+
+Update `wrangler.toml`:
+- set `database_id` from D1 create output
+- keep `binding = "DB"` and `binding = "ERP_FILES"`
+
+### 3. Apply schema migration
+
+```bash
+wrangler d1 migrations apply student-erp-db
+```
+
+### 4. Set Razorpay secrets (optional but required for payments)
+
+```bash
+wrangler pages secret put RAZORPAY_KEY_ID
+wrangler pages secret put RAZORPAY_KEY_SECRET
+```
+
+### 5. Deploy
+
+```bash
+wrangler pages deploy frontend --project-name student-erp
+```
+
+After deploy:
+- frontend is served from Pages
+- API available at `/api/*` via Functions
+- storage uses D1 + R2
+
+### Attendance import on Cloudflare
+
+- In Attendance tab, use `Sync From Excel` with a file selected.
+- Parser currently supports `CSV` for automatic import.
+- `.xlsx` / `.xlsm` files are uploaded to R2 but not parsed automatically.
+- Recommended flow:
+  1. Export `attendance_master.xlsm` sheet to CSV
+  2. Upload CSV in the Attendance section
+  3. Click `Sync From Excel`

@@ -1,0 +1,15 @@
+name = "student-erp"
+compatibility_date = "2026-02-18"
+pages_build_output_dir = "frontend"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "student-erp-db"
+database_id = "4f88c9bf-8c82-4e04-94ae-389d77accc69"
+
+[[r2_buckets]]
+binding = "ERP_FILES"
+bucket_name = "student-erp-files"
+
+[vars]
+SESSION_TIMEOUT_SECONDS = "300"

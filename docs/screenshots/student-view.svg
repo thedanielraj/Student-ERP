@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <rect width="1280" height="720" fill="#edf4fc"/>
+  <rect x="0" y="0" width="250" height="720" fill="#0d2f53"/>
+  <rect x="25" y="165" width="200" height="42" rx="10" fill="#2a5b8d"/>
+  <text x="45" y="193" font-family="Segoe UI, Arial" font-size="20" fill="#ffffff">My Attendance</text>
+  <rect x="25" y="220" width="200" height="42" rx="10" fill="#19466f"/>
+  <text x="45" y="248" font-family="Segoe UI, Arial" font-size="20" fill="#ffffff">My Fees</text>
+  <text x="290" y="65" font-family="Segoe UI, Arial" font-size="36" fill="#10253d">Student View</text>
+  <rect x="290" y="95" width="950" height="260" rx="14" fill="#ffffff" stroke="#d1dbe8"/>
+  <text x="320" y="135" font-family="Segoe UI, Arial" font-size="28" fill="#10253d">Hello Teja</text>
+  <rect x="320" y="155" width="260" height="170" rx="16" fill="#edf6ff" stroke="#d1dbe8"/>
+  <text x="340" y="205" font-family="Segoe UI, Arial" font-size="24" fill="#334155">Attendance</text>
+  <text x="340" y="275" font-family="Segoe UI, Arial" font-size="62" fill="#0f5ea9">92%</text>
+  <rect x="620" y="155" width="590" height="170" rx="16" fill="#f8fbff" stroke="#d1dbe8"/>
+  <text x="650" y="205" font-family="Segoe UI, Arial" font-size="24" fill="#10253d">Recent Entries</text>
+  <rect x="290" y="380" width="950" height="275" rx="14" fill="#ffffff" stroke="#d1dbe8"/>
+  <text x="320" y="420" font-family="Segoe UI, Arial" font-size="24" fill="#10253d">Pay Remaining Fees</text>
+  <rect x="320" y="445" width="300" height="180" rx="14" fill="#edf6ff" stroke="#d1dbe8"/>
+  <text x="350" y="510" font-family="Segoe UI, Arial" font-size="22" fill="#334155">Remaining Amount</text>
+  <text x="350" y="575" font-family="Segoe UI, Arial" font-size="48" fill="#0f5ea9">12,500</text>
+  <rect x="650" y="445" width="560" height="180" rx="14" fill="#f8fbff" stroke="#d1dbe8"/>
+  <text x="680" y="510" font-family="Segoe UI, Arial" font-size="26" fill="#10253d">Payment Window</text>
+  <text x="680" y="560" font-family="Segoe UI, Arial" font-size="30" fill="#0f5ea9">Coming Soon</text>
+  <text x="320" y="690" font-family="Segoe UI, Arial" font-size="22" fill="#475569">Placeholder screenshot - replace with real UI capture</text>
+</svg>
