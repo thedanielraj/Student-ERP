@@ -155,8 +155,6 @@ pytest -q
 ### Student View
 ![Student View](docs/screenshots/student-view.png)
 
-These are starter placeholders so the README renders visually. Replace them with real screenshots when ready.
-
 ## Production Notes
 
 Current auth/session setup is suitable for local/internal usage. For production:
