@@ -144,7 +144,7 @@ pytest -q
 ## Screenshots
 
 ### Login
-![Login](docs/screenshots/login.svg)
+![Login](docs/screenshots/login.png)
 
 ### Superuser Dashboard
 ![Superuser Dashboard](docs/screenshots/superuser-dashboard.svg)
