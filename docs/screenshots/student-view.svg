@@ -21,5 +21,5 @@
   <rect x="650" y="445" width="560" height="180" rx="14" fill="#f8fbff" stroke="#d1dbe8"/>
   <text x="680" y="510" font-family="Segoe UI, Arial" font-size="26" fill="#10253d">Payment Window</text>
   <text x="680" y="560" font-family="Segoe UI, Arial" font-size="30" fill="#0f5ea9">Coming Soon</text>
-  <text x="320" y="690" font-family="Segoe UI, Arial" font-size="22" fill="#475569">Placeholder screenshot - replace with real UI capture</text>
+
 </svg>
