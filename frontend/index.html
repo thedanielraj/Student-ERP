@@ -46,19 +46,63 @@
         <div class="panel-header">
           <h2>Admission Form</h2>
         </div>
+        <div class="panel-header">
+          <h2>Student Details</h2>
+        </div>
         <div class="form-row">
-          <input id="admissionName" placeholder="Full Name" />
-          <input id="admissionPhone" placeholder="Phone Number" />
-          <input id="admissionEmail" placeholder="Email Address" />
+          <input id="admissionFirstName" placeholder="First Name" />
+          <input id="admissionMiddleName" placeholder="Middle Name" />
+          <input id="admissionLastName" placeholder="Last Name" />
+          <input id="admissionPhone" placeholder="Mobile Number" />
+          <input id="admissionEmail" placeholder="Email ID" />
+          <input id="admissionBloodGroup" placeholder="Blood Group" />
+          <input id="admissionAge" type="number" min="1" placeholder="Age" />
+          <input id="admissionDob" type="date" placeholder="Date Of Birth" />
+          <input id="admissionAadhaar" placeholder="Aadhaar Number" />
+          <input id="admissionNationality" placeholder="Nationality" />
           <select id="admissionCourse">
             <option value="">Select Course</option>
             <option value="Ground Operations">Ground Operations</option>
             <option value="Cabin Crew">Cabin Crew</option>
           </select>
         </div>
+
+        <div class="panel-header">
+          <h2>Father Details</h2>
+        </div>
+        <div class="form-row">
+          <input id="fatherName" placeholder="Father Name" />
+          <input id="fatherPhone" placeholder="Father Mobile Number" />
+          <input id="fatherOccupation" placeholder="Father Occupation" />
+          <input id="fatherEmail" placeholder="Father Email ID" />
+        </div>
+
+        <div class="panel-header">
+          <h2>Mother Details</h2>
+        </div>
+        <div class="form-row">
+          <input id="motherName" placeholder="Mother Name" />
+          <input id="motherPhone" placeholder="Mother Mobile Number" />
+          <input id="motherOccupation" placeholder="Mother Occupation" />
+          <input id="motherEmail" placeholder="Mother Email ID" />
+        </div>
+
+        <div class="panel-header">
+          <h2>Address Details</h2>
+        </div>
+        <div class="form-row">
+          <input id="correspondenceAddress" placeholder="Address For Correspondence" />
+          <input id="permanentAddress" placeholder="Permanent Address" />
+        </div>
+
+        <div class="panel-header">
+          <h2>Academic Details</h2>
+          <button type="button" class="btn" onclick="addAcademicRow()">Add Row</button>
+        </div>
+        <div id="academicRows" class="academic-rows"></div>
+
         <div class="home-actions">
           <button class="btn primary" onclick="submitAdmissionForm()">Submit</button>
-          <span class="hint">Submission endpoint can be connected later.</span>
         </div>
       </section>
     </main>

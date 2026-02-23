@@ -201,27 +201,105 @@ async function ensureAdmissionsTable(env) {
   await env.DB.prepare(
     `CREATE TABLE IF NOT EXISTS admissions (
       admission_id INTEGER PRIMARY KEY AUTOINCREMENT,
-      full_name TEXT NOT NULL,
+      first_name TEXT NOT NULL,
+      middle_name TEXT,
+      last_name TEXT NOT NULL,
       phone TEXT NOT NULL,
       email TEXT NOT NULL,
+      blood_group TEXT,
+      age INTEGER,
+      dob TEXT,
+      aadhaar_number TEXT,
+      nationality TEXT,
+      father_name TEXT,
+      father_phone TEXT,
+      father_occupation TEXT,
+      father_email TEXT,
+      mother_name TEXT,
+      mother_phone TEXT,
+      mother_occupation TEXT,
+      mother_email TEXT,
+      correspondence_address TEXT,
+      permanent_address TEXT,
       course TEXT NOT NULL,
+      academic_details_json TEXT NOT NULL DEFAULT '[]',
       status TEXT NOT NULL DEFAULT 'new',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`
   ).run();
+  const cols = await env.DB.prepare("PRAGMA table_info(admissions)").all();
+  const existing = new Set((cols.results || []).map((c) => c.name));
+  const expected = {
+    first_name: "TEXT",
+    middle_name: "TEXT",
+    last_name: "TEXT",
+    phone: "TEXT",
+    email: "TEXT",
+    blood_group: "TEXT",
+    age: "INTEGER",
+    dob: "TEXT",
+    aadhaar_number: "TEXT",
+    nationality: "TEXT",
+    father_name: "TEXT",
+    father_phone: "TEXT",
+    father_occupation: "TEXT",
+    father_email: "TEXT",
+    mother_name: "TEXT",
+    mother_phone: "TEXT",
+    mother_occupation: "TEXT",
+    mother_email: "TEXT",
+    correspondence_address: "TEXT",
+    permanent_address: "TEXT",
+    course: "TEXT",
+    academic_details_json: "TEXT NOT NULL DEFAULT '[]'",
+    status: "TEXT",
+    created_at: "TEXT",
+  };
+  for (const [col, typeSql] of Object.entries(expected)) {
+    if (!existing.has(col)) {
+      await env.DB.prepare(`ALTER TABLE admissions ADD COLUMN ${col} ${typeSql}`).run();
+    }
+  }
 }
 
 async function admissionsApply(request, env) {
   await ensureAdmissionsTable(env);
   const b = await request.json();
-  const fullName = String(b.full_name || "").trim();
+  const firstName = String(b.first_name || "").trim();
+  const middleName = String(b.middle_name || "").trim();
+  const lastName = String(b.last_name || "").trim();
   const phone = String(b.phone || "").trim();
   const email = String(b.email || "").trim();
+  const bloodGroup = String(b.blood_group || "").trim();
+  const age = Number(b.age || 0);
+  const dob = String(b.dob || "").trim();
+  const aadhaarNumber = String(b.aadhaar_number || "").trim();
+  const nationality = String(b.nationality || "").trim();
+  const fatherName = String(b.father_name || "").trim();
+  const fatherPhone = String(b.father_phone || "").trim();
+  const fatherOccupation = String(b.father_occupation || "").trim();
+  const fatherEmail = String(b.father_email || "").trim();
+  const motherName = String(b.mother_name || "").trim();
+  const motherPhone = String(b.mother_phone || "").trim();
+  const motherOccupation = String(b.mother_occupation || "").trim();
+  const motherEmail = String(b.mother_email || "").trim();
+  const correspondenceAddress = String(b.correspondence_address || "").trim();
+  const permanentAddress = String(b.permanent_address || "").trim();
   const course = String(b.course || "").trim();
-  if (!fullName || !phone || !email || !course) throw httpError(400, "Missing required fields");
+  const academicDetails = Array.isArray(b.academic_details) ? b.academic_details : [];
+  const academicDetailsJson = JSON.stringify(academicDetails);
+  if (!firstName || !lastName || !phone || !email || !course) throw httpError(400, "Missing required fields");
   await env.DB.prepare(
-    "INSERT INTO admissions (full_name, phone, email, course) VALUES (?, ?, ?, ?)"
-  ).bind(fullName, phone, email, course).run();
+    `INSERT INTO admissions (
+      first_name, middle_name, last_name, phone, email, blood_group, age, dob, aadhaar_number, nationality,
+      father_name, father_phone, father_occupation, father_email, mother_name, mother_phone, mother_occupation, mother_email,
+      correspondence_address, permanent_address, course, academic_details_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(
+    firstName, middleName, lastName, phone, email, bloodGroup, age, dob, aadhaarNumber, nationality,
+    fatherName, fatherPhone, fatherOccupation, fatherEmail, motherName, motherPhone, motherOccupation, motherEmail,
+    correspondenceAddress, permanentAddress, course, academicDetailsJson
+  ).run();
   return json({ status: "ok", message: "Admission form submitted" });
 }
 

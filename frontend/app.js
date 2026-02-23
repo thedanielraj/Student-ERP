@@ -242,21 +242,74 @@ function showHome() {
 function showAdmissionForm() {
   document.getElementById("homeAdmission")?.classList.remove("hidden");
   document.getElementById("homeWelcome")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const rows = document.querySelectorAll(".academic-row");
+  if (!rows.length) {
+    addAcademicRow();
+  }
 }
 
 function submitAdmissionForm() {
-  const name = (document.getElementById("admissionName")?.value || "").trim();
+  const firstName = (document.getElementById("admissionFirstName")?.value || "").trim();
+  const middleName = (document.getElementById("admissionMiddleName")?.value || "").trim();
+  const lastName = (document.getElementById("admissionLastName")?.value || "").trim();
   const phone = (document.getElementById("admissionPhone")?.value || "").trim();
   const email = (document.getElementById("admissionEmail")?.value || "").trim();
+  const bloodGroup = (document.getElementById("admissionBloodGroup")?.value || "").trim();
+  const age = Number(document.getElementById("admissionAge")?.value || 0);
+  const dob = (document.getElementById("admissionDob")?.value || "").trim();
+  const aadhaarNumber = (document.getElementById("admissionAadhaar")?.value || "").trim();
+  const nationality = (document.getElementById("admissionNationality")?.value || "").trim();
   const course = (document.getElementById("admissionCourse")?.value || "").trim();
-  if (!name || !phone || !email || !course) {
+  const fatherName = (document.getElementById("fatherName")?.value || "").trim();
+  const fatherPhone = (document.getElementById("fatherPhone")?.value || "").trim();
+  const fatherOccupation = (document.getElementById("fatherOccupation")?.value || "").trim();
+  const fatherEmail = (document.getElementById("fatherEmail")?.value || "").trim();
+  const motherName = (document.getElementById("motherName")?.value || "").trim();
+  const motherPhone = (document.getElementById("motherPhone")?.value || "").trim();
+  const motherOccupation = (document.getElementById("motherOccupation")?.value || "").trim();
+  const motherEmail = (document.getElementById("motherEmail")?.value || "").trim();
+  const correspondenceAddress = (document.getElementById("correspondenceAddress")?.value || "").trim();
+  const permanentAddress = (document.getElementById("permanentAddress")?.value || "").trim();
+  const academicDetails = Array.from(document.querySelectorAll(".academic-row"))
+    .map((row) => ({
+      qualification: (row.querySelector(".academic-qualification")?.value || "").trim(),
+      year_of_passing: (row.querySelector(".academic-year")?.value || "").trim(),
+      institution: (row.querySelector(".academic-institution")?.value || "").trim(),
+      percentage: (row.querySelector(".academic-percentage")?.value || "").trim(),
+    }))
+    .filter((r) => r.qualification || r.year_of_passing || r.institution || r.percentage);
+
+  if (!firstName || !lastName || !phone || !email || !course) {
     alert("Fill all admission fields.");
     return;
   }
   fetch(`${API}/admissions/apply`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ full_name: name, phone, email, course })
+    body: JSON.stringify({
+      first_name: firstName,
+      middle_name: middleName,
+      last_name: lastName,
+      phone,
+      email,
+      blood_group: bloodGroup,
+      age,
+      dob,
+      aadhaar_number: aadhaarNumber,
+      nationality,
+      father_name: fatherName,
+      father_phone: fatherPhone,
+      father_occupation: fatherOccupation,
+      father_email: fatherEmail,
+      mother_name: motherName,
+      mother_phone: motherPhone,
+      mother_occupation: motherOccupation,
+      mother_email: motherEmail,
+      correspondence_address: correspondenceAddress,
+      permanent_address: permanentAddress,
+      course,
+      academic_details: academicDetails,
+    })
   })
     .then(async (res) => {
       if (!res.ok) {
@@ -266,15 +319,49 @@ function submitAdmissionForm() {
       return res.json();
     })
     .then(() => {
-      document.getElementById("admissionName").value = "";
+      document.getElementById("admissionFirstName").value = "";
+      document.getElementById("admissionMiddleName").value = "";
+      document.getElementById("admissionLastName").value = "";
       document.getElementById("admissionPhone").value = "";
       document.getElementById("admissionEmail").value = "";
+      document.getElementById("admissionBloodGroup").value = "";
+      document.getElementById("admissionAge").value = "";
+      document.getElementById("admissionDob").value = "";
+      document.getElementById("admissionAadhaar").value = "";
+      document.getElementById("admissionNationality").value = "";
       document.getElementById("admissionCourse").value = "";
+      document.getElementById("fatherName").value = "";
+      document.getElementById("fatherPhone").value = "";
+      document.getElementById("fatherOccupation").value = "";
+      document.getElementById("fatherEmail").value = "";
+      document.getElementById("motherName").value = "";
+      document.getElementById("motherPhone").value = "";
+      document.getElementById("motherOccupation").value = "";
+      document.getElementById("motherEmail").value = "";
+      document.getElementById("correspondenceAddress").value = "";
+      document.getElementById("permanentAddress").value = "";
+      document.getElementById("academicRows").innerHTML = "";
+      addAcademicRow();
       alert("Admission form submitted successfully.");
     })
     .catch((e) => {
       alert(e.message || "Failed to submit admission form.");
     });
+}
+
+function addAcademicRow() {
+  const container = document.getElementById("academicRows");
+  if (!container) return;
+  const row = document.createElement("div");
+  row.className = "academic-row";
+  row.innerHTML = `
+    <input class="academic-qualification" placeholder="Qualification" />
+    <input class="academic-year" placeholder="Year Of Passing" />
+    <input class="academic-institution" placeholder="University / Institution" />
+    <input class="academic-percentage" placeholder="Percentage" />
+    <button type="button" class="btn" onclick="this.parentElement.remove()">Remove</button>
+  `;
+  container.appendChild(row);
 }
 
 function setupSidebarNav() {

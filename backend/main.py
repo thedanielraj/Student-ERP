@@ -143,10 +143,28 @@ class RazorpayVerifyRequest(BaseModel):
 
 
 class AdmissionRequest(BaseModel):
-    full_name: str
+    first_name: str
+    middle_name: str = ""
+    last_name: str
     phone: str
     email: str
+    blood_group: str = ""
+    age: int = 0
+    dob: str = ""
+    aadhaar_number: str = ""
+    nationality: str = ""
+    father_name: str = ""
+    father_phone: str = ""
+    father_occupation: str = ""
+    father_email: str = ""
+    mother_name: str = ""
+    mother_phone: str = ""
+    mother_occupation: str = ""
+    mother_email: str = ""
+    correspondence_address: str = ""
+    permanent_address: str = ""
     course: str
+    academic_details: List[dict] = []
 
 def _create_session(username: str) -> str:
     token = uuid4().hex
@@ -354,33 +372,109 @@ def _ensure_admissions_table():
         """
         CREATE TABLE IF NOT EXISTS admissions (
             admission_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            full_name TEXT NOT NULL,
+            first_name TEXT NOT NULL,
+            middle_name TEXT,
+            last_name TEXT NOT NULL,
             phone TEXT NOT NULL,
             email TEXT NOT NULL,
+            blood_group TEXT,
+            age INTEGER,
+            dob TEXT,
+            aadhaar_number TEXT,
+            nationality TEXT,
+            father_name TEXT,
+            father_phone TEXT,
+            father_occupation TEXT,
+            father_email TEXT,
+            mother_name TEXT,
+            mother_phone TEXT,
+            mother_occupation TEXT,
+            mother_email TEXT,
+            correspondence_address TEXT,
+            permanent_address TEXT,
             course TEXT NOT NULL,
+            academic_details_json TEXT NOT NULL DEFAULT '[]',
             status TEXT NOT NULL DEFAULT 'new',
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
         """
     )
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(admissions)").fetchall()}
+    expected = {
+        "first_name": "TEXT",
+        "middle_name": "TEXT",
+        "last_name": "TEXT",
+        "phone": "TEXT",
+        "email": "TEXT",
+        "blood_group": "TEXT",
+        "age": "INTEGER",
+        "dob": "TEXT",
+        "aadhaar_number": "TEXT",
+        "nationality": "TEXT",
+        "father_name": "TEXT",
+        "father_phone": "TEXT",
+        "father_occupation": "TEXT",
+        "father_email": "TEXT",
+        "mother_name": "TEXT",
+        "mother_phone": "TEXT",
+        "mother_occupation": "TEXT",
+        "mother_email": "TEXT",
+        "correspondence_address": "TEXT",
+        "permanent_address": "TEXT",
+        "course": "TEXT",
+        "academic_details_json": "TEXT NOT NULL DEFAULT '[]'",
+        "status": "TEXT",
+        "created_at": "TEXT",
+    }
+    for col, typ in expected.items():
+        if col not in existing:
+            conn.execute(f"ALTER TABLE admissions ADD COLUMN {col} {typ}")
     conn.commit()
     conn.close()
 
 
 @app.post("/admissions/apply")
 def admissions_apply(payload: AdmissionRequest):
-    full_name = payload.full_name.strip()
+    first_name = payload.first_name.strip()
+    middle_name = payload.middle_name.strip()
+    last_name = payload.last_name.strip()
     phone = payload.phone.strip()
     email = payload.email.strip()
+    blood_group = payload.blood_group.strip()
+    age = int(payload.age or 0)
+    dob = payload.dob.strip()
+    aadhaar_number = payload.aadhaar_number.strip()
+    nationality = payload.nationality.strip()
+    father_name = payload.father_name.strip()
+    father_phone = payload.father_phone.strip()
+    father_occupation = payload.father_occupation.strip()
+    father_email = payload.father_email.strip()
+    mother_name = payload.mother_name.strip()
+    mother_phone = payload.mother_phone.strip()
+    mother_occupation = payload.mother_occupation.strip()
+    mother_email = payload.mother_email.strip()
+    correspondence_address = payload.correspondence_address.strip()
+    permanent_address = payload.permanent_address.strip()
     course = payload.course.strip()
-    if not full_name or not phone or not email or not course:
+    academic_details_json = json.dumps(payload.academic_details or [])
+    if not first_name or not last_name or not phone or not email or not course:
         raise HTTPException(status_code=400, detail="Missing required fields")
 
     _ensure_admissions_table()
     conn = get_connection()
     conn.execute(
-        "INSERT INTO admissions (full_name, phone, email, course) VALUES (?, ?, ?, ?)",
-        (full_name, phone, email, course),
+        """
+        INSERT INTO admissions (
+            first_name, middle_name, last_name, phone, email, blood_group, age, dob, aadhaar_number, nationality,
+            father_name, father_phone, father_occupation, father_email, mother_name, mother_phone, mother_occupation, mother_email,
+            correspondence_address, permanent_address, course, academic_details_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            first_name, middle_name, last_name, phone, email, blood_group, age, dob, aadhaar_number, nationality,
+            father_name, father_phone, father_occupation, father_email, mother_name, mother_phone, mother_occupation, mother_email,
+            correspondence_address, permanent_address, course, academic_details_json,
+        ),
     )
     conn.commit()
     conn.close()

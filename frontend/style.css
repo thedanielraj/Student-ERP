@@ -54,6 +54,18 @@ body {
   flex-wrap: wrap;
 }
 
+.academic-rows {
+  display: grid;
+  gap: 10px;
+}
+
+.academic-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
 .app::before {
   content: "";
   position: fixed;
@@ -516,6 +528,10 @@ select {
 
   .home-main {
     padding: 18px;
+  }
+
+  .academic-row {
+    grid-template-columns: 1fr;
   }
 
   .sidebar {
