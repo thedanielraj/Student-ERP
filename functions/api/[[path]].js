@@ -14,6 +14,9 @@ export async function onRequest(context) {
   }
 
   try {
+    if (path === "public/student-ids" && method === "GET") {
+      return publicStudentIds(env);
+    }
     if (path === "login" && method === "POST") {
       return handleLogin(request, env);
     }
@@ -181,6 +184,14 @@ async function authMe(userId, env) {
     course: s?.course || "",
     batch: s?.batch || "",
   };
+}
+
+async function publicStudentIds(env) {
+  await ensureCredentials(env);
+  const rows = await env.DB.prepare(
+    "SELECT username FROM credentials WHERE role = 'student' AND upper(username) LIKE 'AAI%' ORDER BY username DESC"
+  ).all();
+  return json((rows.results || []).map((r) => r.username));
 }
 
 async function studentFinancials(env, studentId) {

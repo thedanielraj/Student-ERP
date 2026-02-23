@@ -9,6 +9,7 @@ let selectedId = null;
 let authInfo = null;
 let studentFeeSummary = null;
 let razorpayKeyId = null;
+let portalMode = "student";
 
 async function loadStudents() {
   const res = await authFetch(`${API}/students`);
@@ -178,10 +179,82 @@ function setupTabs() {
   });
 }
 
-document.getElementById("search").addEventListener("input", renderStudentList);
+document.getElementById("search")?.addEventListener("input", renderStudentList);
 setupTabs();
 setupSidebarNav();
 initAuth();
+
+async function loadStudentPortalLogins() {
+  const dataList = document.getElementById("studentLoginList");
+  if (!dataList) return;
+  dataList.innerHTML = "";
+  try {
+    const res = await fetch(`${API}/public/student-ids`);
+    if (!res.ok) return;
+    const ids = await res.json();
+    (ids || []).forEach((id) => {
+      const option = document.createElement("option");
+      option.value = id;
+      dataList.appendChild(option);
+    });
+  } catch (_) {
+    // Optional enhancement only.
+  }
+}
+
+async function openPortal(mode) {
+  portalMode = mode === "staff" ? "staff" : "student";
+  const title = document.getElementById("portalTitle");
+  const subtitle = document.getElementById("portalSubtitle");
+  const user = document.getElementById("loginUser");
+  const error = document.getElementById("loginError");
+  error?.classList.add("hidden");
+  if (portalMode === "staff") {
+    if (title) title.textContent = "Staff Portal";
+    if (subtitle) subtitle.textContent = "Only superuser access is enabled.";
+    if (user) {
+      user.placeholder = "superuser";
+      user.value = "superuser";
+      user.removeAttribute("list");
+    }
+  } else {
+    if (title) title.textContent = "Student Portal";
+    if (subtitle) subtitle.textContent = "Use your AAI student login.";
+    if (user) {
+      user.placeholder = "AAI student ID";
+      user.value = "";
+      user.setAttribute("list", "studentLoginList");
+    }
+    await loadStudentPortalLogins();
+  }
+  document.getElementById("homeRoot")?.classList.add("hidden");
+  document.getElementById("loginRoot")?.classList.remove("hidden");
+  document.getElementById("appRoot")?.classList.add("hidden");
+}
+
+function showHome() {
+  localStorage.removeItem(TOKEN_KEY);
+  document.getElementById("homeRoot")?.classList.remove("hidden");
+  document.getElementById("loginRoot")?.classList.add("hidden");
+  document.getElementById("appRoot")?.classList.add("hidden");
+}
+
+function showAdmissionForm() {
+  document.getElementById("homeAdmission")?.classList.remove("hidden");
+  document.getElementById("homeWelcome")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function submitAdmissionForm() {
+  const name = (document.getElementById("admissionName")?.value || "").trim();
+  const phone = (document.getElementById("admissionPhone")?.value || "").trim();
+  const email = (document.getElementById("admissionEmail")?.value || "").trim();
+  const course = (document.getElementById("admissionCourse")?.value || "").trim();
+  if (!name || !phone || !email || !course) {
+    alert("Fill all admission fields.");
+    return;
+  }
+  alert("Admission request captured. Backend form endpoint can be connected next.");
+}
 
 function setupSidebarNav() {
   document.querySelectorAll(".nav-item").forEach(btn => {
@@ -807,12 +880,12 @@ async function submitAttendance() {
 async function initAuth() {
   const token = localStorage.getItem(TOKEN_KEY);
   if (!token) {
-    showLogin();
+    showHome();
     return;
   }
-  const res = await authFetch(`${API}/auth/me`);
+  const res = await authFetch(`${API}/auth/me`, { suppressAutoHome: true });
   if (!res.ok) {
-    showLogin();
+    showHome();
     return;
   }
   authInfo = await res.json();
@@ -852,6 +925,18 @@ async function handleLogin() {
     return;
   }
 
+  if (portalMode === "staff" && user.toLowerCase() !== "superuser") {
+    error.textContent = "Only superuser can use staff portal right now.";
+    error.classList.remove("hidden");
+    return;
+  }
+
+  if (portalMode === "student" && !/^AAI/i.test(user)) {
+    error.textContent = "Use your AAI student ID in student portal.";
+    error.classList.remove("hidden");
+    return;
+  }
+
   const res = await fetch(`${API}/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -870,20 +955,15 @@ async function handleLogin() {
   await initAuth();
 }
 
-function showLogin() {
-  localStorage.removeItem(TOKEN_KEY);
-  document.getElementById("loginRoot").classList.remove("hidden");
-  document.getElementById("appRoot").classList.add("hidden");
-}
-
 function showApp() {
-  document.getElementById("loginRoot").classList.add("hidden");
-  document.getElementById("appRoot").classList.remove("hidden");
+  document.getElementById("homeRoot")?.classList.add("hidden");
+  document.getElementById("loginRoot")?.classList.add("hidden");
+  document.getElementById("appRoot")?.classList.remove("hidden");
 }
 
 function logout() {
   localStorage.removeItem(TOKEN_KEY);
-  showLogin();
+  showHome();
 }
 
 async function authFetch(url, options = {}) {
@@ -892,9 +972,14 @@ async function authFetch(url, options = {}) {
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
-  const res = await fetch(url, { ...options, headers });
+  const suppressAutoHome = Boolean(options.suppressAutoHome);
+  const reqOptions = { ...options, headers };
+  delete reqOptions.suppressAutoHome;
+  const res = await fetch(url, reqOptions);
   if (res.status === 401) {
-    showLogin();
+    if (!suppressAutoHome) {
+      showHome();
+    }
   }
   return res;
 }

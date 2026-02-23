@@ -9,16 +9,73 @@
 </head>
 
 <body>
-  <div id="loginRoot" class="login-root">
+  <div id="homeRoot" class="home-root">
+    <aside class="home-sidebar">
+      <div class="brand">
+        <div class="logo-wrap">
+          <img src="/assets/logo.png" alt="AAI" class="logo-img" />
+        </div>
+        <div>
+          <div class="brand-title">Arunand's Aviation Institute</div>
+          <div class="brand-sub">Fly Beyond The Sky</div>
+        </div>
+      </div>
+      <button class="nav-item active" onclick="openPortal('student')">Student Portal</button>
+      <button class="nav-item" onclick="openPortal('staff')">Staff Portal</button>
+      <button class="nav-item" onclick="showAdmissionForm()">Admission Form</button>
+    </aside>
+    <main class="home-main">
+      <section id="homeWelcome" class="panel">
+        <h1>Welcome To Arunand's Aviation Institute</h1>
+        <p>Industry-focused training for Ground Operations and Cabin Crew careers.</p>
+        <div class="home-actions">
+          <button class="btn primary" onclick="showAdmissionForm()">Apply For Admission</button>
+          <button class="btn" onclick="openPortal('student')">Open Student Portal</button>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-header">
+          <h2>About Us</h2>
+        </div>
+        <p class="meta">
+          Arunand's Aviation Institute provides practical aviation training with structured attendance tracking,
+          performance monitoring, and fee management through an integrated ERP platform.
+        </p>
+      </section>
+      <section id="homeAdmission" class="panel hidden">
+        <div class="panel-header">
+          <h2>Admission Form</h2>
+        </div>
+        <div class="form-row">
+          <input id="admissionName" placeholder="Full Name" />
+          <input id="admissionPhone" placeholder="Phone Number" />
+          <input id="admissionEmail" placeholder="Email Address" />
+          <select id="admissionCourse">
+            <option value="">Select Course</option>
+            <option value="Ground Operations">Ground Operations</option>
+            <option value="Cabin Crew">Cabin Crew</option>
+          </select>
+        </div>
+        <div class="home-actions">
+          <button class="btn primary" onclick="submitAdmissionForm()">Submit</button>
+          <span class="hint">Submission endpoint can be connected later.</span>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="loginRoot" class="login-root hidden">
     <div class="login-card">
       <div class="brand-mark">
         <img src="/assets/logo.png" alt="Arunand's Aviation Institute" class="logo-img" />
       </div>
-      <h1>Login</h1>
-      <p>Use your student ID or superuser</p>
-      <input id="loginUser" placeholder="Username" />
+      <h1 id="portalTitle">Login</h1>
+      <p id="portalSubtitle">Use your student ID or superuser</p>
+      <input id="loginUser" list="studentLoginList" placeholder="Username" />
+      <datalist id="studentLoginList"></datalist>
       <input id="loginPass" type="password" placeholder="Password" />
       <button class="btn primary" onclick="handleLogin()">Sign In</button>
+      <button class="btn" onclick="showHome()">Back</button>
       <div id="loginError" class="login-error hidden">Invalid credentials</div>
     </div>
   </div>

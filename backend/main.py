@@ -255,7 +255,7 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
     if request.method == "OPTIONS":
         return await call_next(request)
-    if path in ["/", "/login", "/auth/me", "/docs", "/openapi.json", "/style.css", "/app.js"] or path.startswith("/static"):
+    if path in ["/", "/login", "/auth/me", "/public/student-ids", "/docs", "/openapi.json", "/style.css", "/app.js"] or path.startswith("/static"):
         return await call_next(request)
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
@@ -331,6 +331,14 @@ def style_file():
 @app.get("/app.js")
 def app_file():
     return FileResponse(FRONTEND_DIR / "app.js")
+
+@app.get("/public/student-ids")
+def public_student_ids():
+    _ensure_passwords_for_students()
+    passwords = _load_passwords()
+    ids = [u for u in passwords.keys() if u != "superuser" and str(u).upper().startswith("AAI")]
+    ids.sort(reverse=True)
+    return ids
 
 @app.get("/students")
 def list_students(request: Request):
