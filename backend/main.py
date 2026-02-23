@@ -141,6 +141,13 @@ class RazorpayVerifyRequest(BaseModel):
     razorpay_signature: str
     amount_paid_inr: float
 
+
+class AdmissionRequest(BaseModel):
+    full_name: str
+    phone: str
+    email: str
+    course: str
+
 def _create_session(username: str) -> str:
     token = uuid4().hex
     SESSIONS[token] = {"user": username, "last_activity": time.time()}
@@ -255,7 +262,7 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
     if request.method == "OPTIONS":
         return await call_next(request)
-    if path in ["/", "/login", "/auth/me", "/public/student-ids", "/docs", "/openapi.json", "/style.css", "/app.js"] or path.startswith("/static"):
+    if path in ["/", "/login", "/auth/me", "/public/student-ids", "/admissions/apply", "/docs", "/openapi.json", "/style.css", "/app.js"] or path.startswith("/static"):
         return await call_next(request)
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
@@ -339,6 +346,45 @@ def public_student_ids():
     ids = [u for u in passwords.keys() if u != "superuser" and str(u).upper().startswith("AAI")]
     ids.sort(reverse=True)
     return ids
+
+
+def _ensure_admissions_table():
+    conn = get_connection()
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS admissions (
+            admission_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            full_name TEXT NOT NULL,
+            phone TEXT NOT NULL,
+            email TEXT NOT NULL,
+            course TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'new',
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+@app.post("/admissions/apply")
+def admissions_apply(payload: AdmissionRequest):
+    full_name = payload.full_name.strip()
+    phone = payload.phone.strip()
+    email = payload.email.strip()
+    course = payload.course.strip()
+    if not full_name or not phone or not email or not course:
+        raise HTTPException(status_code=400, detail="Missing required fields")
+
+    _ensure_admissions_table()
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO admissions (full_name, phone, email, course) VALUES (?, ?, ?, ?)",
+        (full_name, phone, email, course),
+    )
+    conn.commit()
+    conn.close()
+    return {"status": "ok", "message": "Admission form submitted"}
 
 @app.get("/students")
 def list_students(request: Request):

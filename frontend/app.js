@@ -253,7 +253,28 @@ function submitAdmissionForm() {
     alert("Fill all admission fields.");
     return;
   }
-  alert("Admission request captured. Backend form endpoint can be connected next.");
+  fetch(`${API}/admissions/apply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ full_name: name, phone, email, course })
+  })
+    .then(async (res) => {
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to submit admission form.");
+      }
+      return res.json();
+    })
+    .then(() => {
+      document.getElementById("admissionName").value = "";
+      document.getElementById("admissionPhone").value = "";
+      document.getElementById("admissionEmail").value = "";
+      document.getElementById("admissionCourse").value = "";
+      alert("Admission form submitted successfully.");
+    })
+    .catch((e) => {
+      alert(e.message || "Failed to submit admission form.");
+    });
 }
 
 function setupSidebarNav() {

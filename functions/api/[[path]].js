@@ -17,6 +17,9 @@ export async function onRequest(context) {
     if (path === "public/student-ids" && method === "GET") {
       return publicStudentIds(env);
     }
+    if (path === "admissions/apply" && method === "POST") {
+      return admissionsApply(request, env);
+    }
     if (path === "login" && method === "POST") {
       return handleLogin(request, env);
     }
@@ -192,6 +195,34 @@ async function publicStudentIds(env) {
     "SELECT username FROM credentials WHERE role = 'student' AND upper(username) LIKE 'AAI%' ORDER BY username DESC"
   ).all();
   return json((rows.results || []).map((r) => r.username));
+}
+
+async function ensureAdmissionsTable(env) {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS admissions (
+      admission_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      full_name TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      email TEXT NOT NULL,
+      course TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'new',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`
+  ).run();
+}
+
+async function admissionsApply(request, env) {
+  await ensureAdmissionsTable(env);
+  const b = await request.json();
+  const fullName = String(b.full_name || "").trim();
+  const phone = String(b.phone || "").trim();
+  const email = String(b.email || "").trim();
+  const course = String(b.course || "").trim();
+  if (!fullName || !phone || !email || !course) throw httpError(400, "Missing required fields");
+  await env.DB.prepare(
+    "INSERT INTO admissions (full_name, phone, email, course) VALUES (?, ?, ?, ?)"
+  ).bind(fullName, phone, email, course).run();
+  return json({ status: "ok", message: "Admission form submitted" });
 }
 
 async function studentFinancials(env, studentId) {
