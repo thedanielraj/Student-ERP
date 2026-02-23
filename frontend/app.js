@@ -239,6 +239,14 @@ function showHome() {
   document.getElementById("appRoot")?.classList.add("hidden");
 }
 
+function toggleSidebar(scope) {
+  if (scope === "home") {
+    document.querySelector(".home-sidebar")?.classList.toggle("open");
+    return;
+  }
+  document.querySelector(".sidebar")?.classList.toggle("open");
+}
+
 function showAdmissionForm() {
   document.getElementById("homeAdmission")?.classList.remove("hidden");
   document.getElementById("homeWelcome")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -248,7 +256,7 @@ function showAdmissionForm() {
   }
 }
 
-function submitAdmissionForm() {
+async function submitAdmissionForm() {
   const firstName = (document.getElementById("admissionFirstName")?.value || "").trim();
   const middleName = (document.getElementById("admissionMiddleName")?.value || "").trim();
   const lastName = (document.getElementById("admissionLastName")?.value || "").trim();
@@ -283,70 +291,130 @@ function submitAdmissionForm() {
     alert("Fill all admission fields.");
     return;
   }
-  fetch(`${API}/admissions/apply`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      first_name: firstName,
-      middle_name: middleName,
-      last_name: lastName,
-      phone,
-      email,
-      blood_group: bloodGroup,
-      age,
-      dob,
-      aadhaar_number: aadhaarNumber,
-      nationality,
-      father_name: fatherName,
-      father_phone: fatherPhone,
-      father_occupation: fatherOccupation,
-      father_email: fatherEmail,
-      mother_name: motherName,
-      mother_phone: motherPhone,
-      mother_occupation: motherOccupation,
-      mother_email: motherEmail,
-      correspondence_address: correspondenceAddress,
-      permanent_address: permanentAddress,
-      course,
-      academic_details: academicDetails,
-    })
-  })
-    .then(async (res) => {
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || "Failed to submit admission form.");
-      }
-      return res.json();
-    })
-    .then(() => {
-      document.getElementById("admissionFirstName").value = "";
-      document.getElementById("admissionMiddleName").value = "";
-      document.getElementById("admissionLastName").value = "";
-      document.getElementById("admissionPhone").value = "";
-      document.getElementById("admissionEmail").value = "";
-      document.getElementById("admissionBloodGroup").value = "";
-      document.getElementById("admissionAge").value = "";
-      document.getElementById("admissionDob").value = "";
-      document.getElementById("admissionAadhaar").value = "";
-      document.getElementById("admissionNationality").value = "";
-      document.getElementById("admissionCourse").value = "";
-      document.getElementById("fatherName").value = "";
-      document.getElementById("fatherPhone").value = "";
-      document.getElementById("fatherOccupation").value = "";
-      document.getElementById("fatherEmail").value = "";
-      document.getElementById("motherName").value = "";
-      document.getElementById("motherPhone").value = "";
-      document.getElementById("motherOccupation").value = "";
-      document.getElementById("motherEmail").value = "";
-      document.getElementById("correspondenceAddress").value = "";
-      document.getElementById("permanentAddress").value = "";
-      document.getElementById("academicRows").innerHTML = "";
-      addAcademicRow();
-      alert("Admission form submitted successfully.");
-    })
-    .catch((e) => {
-      alert(e.message || "Failed to submit admission form.");
+  const payload = {
+    first_name: firstName,
+    middle_name: middleName,
+    last_name: lastName,
+    phone,
+    email,
+    blood_group: bloodGroup,
+    age,
+    dob,
+    aadhaar_number: aadhaarNumber,
+    nationality,
+    father_name: fatherName,
+    father_phone: fatherPhone,
+    father_occupation: fatherOccupation,
+    father_email: fatherEmail,
+    mother_name: motherName,
+    mother_phone: motherPhone,
+    mother_occupation: motherOccupation,
+    mother_email: motherEmail,
+    correspondence_address: correspondenceAddress,
+    permanent_address: permanentAddress,
+    course,
+    academic_details: academicDetails,
+  };
+
+  try {
+    const pdfAttachment = await generateAdmissionPdfAttachment(payload);
+    if (pdfAttachment) {
+      payload.admission_pdf_base64 = pdfAttachment.base64;
+      payload.admission_pdf_filename = pdfAttachment.filename;
+    }
+
+    const res = await fetch(`${API}/admissions/apply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || "Failed to submit admission form.");
+    }
+
+    document.getElementById("admissionFirstName").value = "";
+    document.getElementById("admissionMiddleName").value = "";
+    document.getElementById("admissionLastName").value = "";
+    document.getElementById("admissionPhone").value = "";
+    document.getElementById("admissionEmail").value = "";
+    document.getElementById("admissionBloodGroup").value = "";
+    document.getElementById("admissionAge").value = "";
+    document.getElementById("admissionDob").value = "";
+    document.getElementById("admissionAadhaar").value = "";
+    document.getElementById("admissionNationality").value = "";
+    document.getElementById("admissionCourse").value = "";
+    document.getElementById("fatherName").value = "";
+    document.getElementById("fatherPhone").value = "";
+    document.getElementById("fatherOccupation").value = "";
+    document.getElementById("fatherEmail").value = "";
+    document.getElementById("motherName").value = "";
+    document.getElementById("motherPhone").value = "";
+    document.getElementById("motherOccupation").value = "";
+    document.getElementById("motherEmail").value = "";
+    document.getElementById("correspondenceAddress").value = "";
+    document.getElementById("permanentAddress").value = "";
+    document.getElementById("academicRows").innerHTML = "";
+    addAcademicRow();
+    alert("Admission form submitted successfully.");
+  } catch (e) {
+    alert(e.message || "Failed to submit admission form.");
+  }
+}
+
+async function generateAdmissionPdfAttachment(payload) {
+  if (!window.PDFLib) return null;
+  const { PDFDocument, StandardFonts, rgb } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([595, 842]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+
+  page.drawText("Admission Form Submission", {
+    x: 40, y: 800, size: 18, font: bold, color: rgb(0.06, 0.27, 0.5),
+  });
+
+  const lines = [
+    `Name: ${payload.first_name} ${payload.middle_name} ${payload.last_name}`.trim(),
+    `Course: ${payload.course}`,
+    `Phone: ${payload.phone}`,
+    `Email: ${payload.email}`,
+    `Blood Group: ${payload.blood_group || "-"}`,
+    `Age: ${payload.age || "-"}`,
+    `DOB: ${payload.dob || "-"}`,
+    `Aadhaar: ${payload.aadhaar_number || "-"}`,
+    `Nationality: ${payload.nationality || "-"}`,
+    `Father: ${payload.father_name || "-"} | ${payload.father_phone || "-"} | ${payload.father_occupation || "-"}`,
+    `Father Email: ${payload.father_email || "-"}`,
+    `Mother: ${payload.mother_name || "-"} | ${payload.mother_phone || "-"} | ${payload.mother_occupation || "-"}`,
+    `Mother Email: ${payload.mother_email || "-"}`,
+    `Correspondence Address: ${payload.correspondence_address || "-"}`,
+    `Permanent Address: ${payload.permanent_address || "-"}`,
+    "Academic Details:",
+  ];
+
+  let y = 772;
+  for (const line of lines) {
+    page.drawText(line, { x: 40, y, size: 10, font, color: rgb(0.1, 0.1, 0.1) });
+    y -= 18;
+  }
+
+  for (const item of payload.academic_details || []) {
+    const text = `- ${item.qualification || "-"} | ${item.year_of_passing || "-"} | ${item.institution || "-"} | ${item.percentage || "-"}%`;
+    if (y < 40) break;
+    page.drawText(text, { x: 55, y, size: 10, font, color: rgb(0.1, 0.1, 0.1) });
+    y -= 16;
+  }
+
+  const bytes = await doc.save();
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  const base64 = btoa(binary);
+  const filename = `admission_${payload.first_name}_${payload.last_name}_${Date.now()}.pdf`.replace(/\s+/g, "_");
+  return { base64, filename };
 }
 
 function addAcademicRow() {

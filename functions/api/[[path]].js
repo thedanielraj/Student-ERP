@@ -262,6 +262,44 @@ async function ensureAdmissionsTable(env) {
   }
 }
 
+async function sendAdmissionEmail(env, payload, pdfBase64, pdfFileName) {
+  const apiKey = String(env.RESEND_API_KEY || "").trim();
+  if (!apiKey || !pdfBase64) return { attempted: false, sent: false };
+  const toEmail = String(env.ADMISSIONS_TO_EMAIL || "thedanielraj@outlook.com").trim();
+  const fromEmail = String(env.ADMISSIONS_FROM_EMAIL || "Arunands ERP <onboarding@resend.dev>").trim();
+  const fullName = [payload.firstName, payload.middleName, payload.lastName].filter(Boolean).join(" ");
+  const text = [
+    "New admission form submitted.",
+    `Name: ${fullName}`,
+    `Course: ${payload.course}`,
+    `Phone: ${payload.phone}`,
+    `Email: ${payload.email}`,
+  ].join("\n");
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: fromEmail,
+      to: [toEmail],
+      subject: `New Admission - ${fullName || "Applicant"}`,
+      text,
+      attachments: [
+        {
+          filename: pdfFileName || `admission_${Date.now()}.pdf`,
+          content: pdfBase64,
+        },
+      ],
+    }),
+  });
+  if (!res.ok) {
+    return { attempted: true, sent: false, detail: await res.text() };
+  }
+  return { attempted: true, sent: true };
+}
+
 async function admissionsApply(request, env) {
   await ensureAdmissionsTable(env);
   const b = await request.json();
@@ -286,6 +324,8 @@ async function admissionsApply(request, env) {
   const correspondenceAddress = String(b.correspondence_address || "").trim();
   const permanentAddress = String(b.permanent_address || "").trim();
   const course = String(b.course || "").trim();
+  const admissionPdfBase64 = String(b.admission_pdf_base64 || "").trim();
+  const admissionPdfFilename = String(b.admission_pdf_filename || "").trim();
   const academicDetails = Array.isArray(b.academic_details) ? b.academic_details : [];
   const academicDetailsJson = JSON.stringify(academicDetails);
   if (!firstName || !lastName || !phone || !email || !course) throw httpError(400, "Missing required fields");
@@ -300,7 +340,17 @@ async function admissionsApply(request, env) {
     fatherName, fatherPhone, fatherOccupation, fatherEmail, motherName, motherPhone, motherOccupation, motherEmail,
     correspondenceAddress, permanentAddress, course, academicDetailsJson
   ).run();
-  return json({ status: "ok", message: "Admission form submitted" });
+  const emailResult = await sendAdmissionEmail(
+    env,
+    { firstName, middleName, lastName, phone, email, course },
+    admissionPdfBase64,
+    admissionPdfFilename
+  );
+  return json({
+    status: "ok",
+    message: "Admission form submitted",
+    email_sent: emailResult.sent,
+  });
 }
 
 async function studentFinancials(env, studentId) {

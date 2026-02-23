@@ -45,6 +45,9 @@ COURSE_FEES_INR = {
 }
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "").strip()
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "").strip()
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
+ADMISSIONS_TO_EMAIL = os.getenv("ADMISSIONS_TO_EMAIL", "thedanielraj@outlook.com").strip()
+ADMISSIONS_FROM_EMAIL = os.getenv("ADMISSIONS_FROM_EMAIL", "Arunands ERP <onboarding@resend.dev>").strip()
 
 init_db()
 
@@ -165,6 +168,8 @@ class AdmissionRequest(BaseModel):
     permanent_address: str = ""
     course: str
     academic_details: List[dict] = []
+    admission_pdf_base64: str = ""
+    admission_pdf_filename: str = ""
 
 def _create_session(username: str) -> str:
     token = uuid4().hex
@@ -274,6 +279,45 @@ def _create_razorpay_order(amount_paise: int, receipt: str, notes: dict):
     )
     with urlrequest.urlopen(req, timeout=20) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
+
+def _send_admission_email(first_name: str, middle_name: str, last_name: str, phone: str, email: str, course: str, pdf_base64: str, pdf_filename: str):
+    if not RESEND_API_KEY or not pdf_base64:
+        return False
+    full_name = " ".join([p for p in [first_name, middle_name, last_name] if p]).strip()
+    payload = {
+        "from": ADMISSIONS_FROM_EMAIL,
+        "to": [ADMISSIONS_TO_EMAIL],
+        "subject": f"New Admission - {full_name or 'Applicant'}",
+        "text": "\n".join([
+            "New admission form submitted.",
+            f"Name: {full_name}",
+            f"Course: {course}",
+            f"Phone: {phone}",
+            f"Email: {email}",
+        ]),
+        "attachments": [
+            {
+                "filename": pdf_filename or f"admission_{int(time.time())}.pdf",
+                "content": pdf_base64,
+            }
+        ],
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urlrequest.Request(
+        "https://api.resend.com/emails",
+        data=data,
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urlrequest.urlopen(req, timeout=20):
+            return True
+    except Exception:
+        return False
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
@@ -457,6 +501,8 @@ def admissions_apply(payload: AdmissionRequest):
     permanent_address = payload.permanent_address.strip()
     course = payload.course.strip()
     academic_details_json = json.dumps(payload.academic_details or [])
+    admission_pdf_base64 = (payload.admission_pdf_base64 or "").strip()
+    admission_pdf_filename = (payload.admission_pdf_filename or "").strip()
     if not first_name or not last_name or not phone or not email or not course:
         raise HTTPException(status_code=400, detail="Missing required fields")
 
@@ -478,7 +524,10 @@ def admissions_apply(payload: AdmissionRequest):
     )
     conn.commit()
     conn.close()
-    return {"status": "ok", "message": "Admission form submitted"}
+    email_sent = _send_admission_email(
+        first_name, middle_name, last_name, phone, email, course, admission_pdf_base64, admission_pdf_filename
+    )
+    return {"status": "ok", "message": "Admission form submitted", "email_sent": email_sent}
 
 @app.get("/students")
 def list_students(request: Request):
