@@ -354,7 +354,7 @@ async function admissionsApply(request, env) {
   const academicDetails = Array.isArray(b.academic_details) ? b.academic_details : [];
   const academicDetailsJson = JSON.stringify(academicDetails);
   if (!firstName || !lastName || !phone || !email || !course) throw httpError(400, "Missing required fields");
-  await env.DB.prepare(
+  const ins = await env.DB.prepare(
     `INSERT INTO admissions (
       first_name, middle_name, last_name, phone, email, blood_group, age, dob, aadhaar_number, nationality,
       father_name, father_phone, father_occupation, father_email, mother_name, mother_phone, mother_occupation, mother_email,
@@ -365,6 +365,14 @@ async function admissionsApply(request, env) {
     fatherName, fatherPhone, fatherOccupation, fatherEmail, motherName, motherPhone, motherOccupation, motherEmail,
     correspondenceAddress, permanentAddress, course, academicDetailsJson
   ).run();
+  const admissionId = Number(ins.meta?.last_row_id || 0);
+  await writeActivity(
+    env,
+    { user_id: "public_admission_form" },
+    "admission_submitted",
+    `Admission submitted: ${firstName} ${lastName} (${course})`,
+    { admission_id: admissionId, first_name: firstName, last_name: lastName, course, phone, email }
+  );
   const emailResult = await sendAdmissionEmail(
     env,
     { firstName, middleName, lastName, phone, email, course },
@@ -630,6 +638,14 @@ async function attendanceSyncUpload(request, session, env) {
     else skipped++;
   }
 
+  await writeActivity(
+    env,
+    session,
+    "attendance_synced_csv",
+    `Attendance synced from CSV (${inserted} inserted, ${skipped} skipped)`,
+    { inserted, skipped, source_key: key }
+  );
+
   return json({
     status: "ok",
     source_key: key,
@@ -745,8 +761,15 @@ async function timetableList(session, env) {
 async function timetableCreate(request, session, env) {
   if (!isSuperuser(session)) throw httpError(403, "Forbidden");
   const b = await request.json();
-  await env.DB.prepare("INSERT INTO timetable (title, day_of_week, start_time, end_time, course, batch, location, instructor) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+  const result = await env.DB.prepare("INSERT INTO timetable (title, day_of_week, start_time, end_time, course, batch, location, instructor) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
     .bind(b.title || "", b.day_of_week || "", b.start_time || "", b.end_time || "", b.course || "", b.batch || "", b.location || "", b.instructor || "").run();
+  await writeActivity(
+    env,
+    session,
+    "timetable_created",
+    `Timetable entry added: ${String(b.title || "").trim() || "Untitled"} (${String(b.day_of_week || "").trim()})`,
+    { timetable_id: Number(result.meta?.last_row_id || 0), ...b }
+  );
   return json({ status: "ok", message: "Timetable entry created" });
 }
 
@@ -787,8 +810,15 @@ async function interviewsList(session, env) {
 async function interviewsCreate(request, session, env) {
   if (!isSuperuser(session)) throw httpError(403, "Forbidden");
   const b = await request.json();
-  await env.DB.prepare("INSERT INTO interview_stats (airline_name, interview_date, notes) VALUES (?, ?, ?)")
+  const result = await env.DB.prepare("INSERT INTO interview_stats (airline_name, interview_date, notes) VALUES (?, ?, ?)")
     .bind(b.airline_name || "", b.interview_date || "", b.notes || "").run();
+  await writeActivity(
+    env,
+    session,
+    "interview_created",
+    `Interview record added: ${String(b.airline_name || "").trim()} (${String(b.interview_date || "").trim()})`,
+    { interview_id: Number(result.meta?.last_row_id || 0), ...b }
+  );
   return json({ status: "ok", message: "Interview stat created" });
 }
 
@@ -800,8 +830,15 @@ async function announcementsList(env) {
 async function announcementsCreate(request, session, env) {
   if (!isSuperuser(session)) throw httpError(403, "Forbidden");
   const b = await request.json();
-  await env.DB.prepare("INSERT INTO announcements (title, message, created_by) VALUES (?, ?, ?)")
+  const result = await env.DB.prepare("INSERT INTO announcements (title, message, created_by) VALUES (?, ?, ?)")
     .bind(b.title || "", b.message || "", session.user_id).run();
+  await writeActivity(
+    env,
+    session,
+    "announcement_created",
+    `Announcement posted: ${String(b.title || "").trim()}`,
+    { announcement_id: Number(result.meta?.last_row_id || 0), title: b.title || "" }
+  );
   return json({ status: "ok", message: "Announcement created" });
 }
 
@@ -815,8 +852,20 @@ async function notificationsList(session, env) {
 async function notificationsCreate(request, session, env) {
   if (!isSuperuser(session)) throw httpError(403, "Forbidden");
   const b = await request.json();
-  await env.DB.prepare("INSERT INTO notifications (title, message, level, target_user) VALUES (?, ?, ?, ?)")
+  const result = await env.DB.prepare("INSERT INTO notifications (title, message, level, target_user) VALUES (?, ?, ?, ?)")
     .bind(b.title || "", b.message || "", b.level || "info", b.target_user || null).run();
+  await writeActivity(
+    env,
+    session,
+    "notification_created",
+    `Notification created: ${String(b.title || "").trim()}`,
+    {
+      notification_id: Number(result.meta?.last_row_id || 0),
+      title: b.title || "",
+      target_user: b.target_user || null,
+      level: b.level || "info",
+    }
+  );
   return json({ status: "ok", message: "Notification created" });
 }
 
@@ -844,7 +893,16 @@ async function activityLogs(session, env) {
       created_at: r.created_at,
       undone: Boolean(r.undone),
       undone_at: r.undone_at,
-      undoable: !r.undone && ["student_added", "attendance_recorded", "fee_recorded"].includes(r.action_type),
+      undoable: !r.undone && [
+        "student_added",
+        "attendance_recorded",
+        "fee_recorded",
+        "timetable_created",
+        "interview_created",
+        "announcement_created",
+        "notification_created",
+        "admission_submitted",
+      ].includes(r.action_type),
     };
   });
   return json(data);
@@ -880,6 +938,27 @@ async function activityUndo(request, session, env) {
     const feeId = Number(payload.fee_id || 0);
     if (!feeId) throw httpError(400, "Undo payload missing fee_id");
     await env.DB.prepare("DELETE FROM fees WHERE fee_id = ?").bind(feeId).run();
+  } else if (row.action_type === "timetable_created") {
+    const timetableId = Number(payload.timetable_id || 0);
+    if (!timetableId) throw httpError(400, "Undo payload missing timetable_id");
+    await env.DB.prepare("DELETE FROM timetable WHERE timetable_id = ?").bind(timetableId).run();
+  } else if (row.action_type === "interview_created") {
+    const interviewId = Number(payload.interview_id || 0);
+    if (!interviewId) throw httpError(400, "Undo payload missing interview_id");
+    await env.DB.prepare("DELETE FROM interview_stats WHERE interview_id = ?").bind(interviewId).run();
+  } else if (row.action_type === "announcement_created") {
+    const announcementId = Number(payload.announcement_id || 0);
+    if (!announcementId) throw httpError(400, "Undo payload missing announcement_id");
+    await env.DB.prepare("DELETE FROM announcements WHERE announcement_id = ?").bind(announcementId).run();
+  } else if (row.action_type === "notification_created") {
+    const notificationId = Number(payload.notification_id || 0);
+    if (!notificationId) throw httpError(400, "Undo payload missing notification_id");
+    await env.DB.prepare("DELETE FROM notifications WHERE notification_id = ?").bind(notificationId).run();
+  } else if (row.action_type === "admission_submitted") {
+    const admissionId = Number(payload.admission_id || 0);
+    if (!admissionId) throw httpError(400, "Undo payload missing admission_id");
+    await ensureAdmissionsTable(env);
+    await env.DB.prepare("DELETE FROM admissions WHERE admission_id = ?").bind(admissionId).run();
   } else {
     throw httpError(400, "This action is not undoable");
   }

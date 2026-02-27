@@ -544,7 +544,7 @@ def admissions_apply(payload: AdmissionRequest):
 
     _ensure_admissions_table()
     conn = get_connection()
-    conn.execute(
+    cur = conn.execute(
         """
         INSERT INTO admissions (
             first_name, middle_name, last_name, phone, email, blood_group, age, dob, aadhaar_number, nationality,
@@ -558,8 +558,15 @@ def admissions_apply(payload: AdmissionRequest):
             correspondence_address, permanent_address, course, academic_details_json,
         ),
     )
+    admission_id = cur.lastrowid
     conn.commit()
     conn.close()
+    _log_activity(
+        {"user": "public_admission_form"},
+        "admission_submitted",
+        f"Admission submitted: {first_name} {last_name} ({course})",
+        {"admission_id": admission_id, "first_name": first_name, "last_name": last_name, "course": course, "phone": phone, "email": email},
+    )
     email_sent = _send_admission_email(
         first_name, middle_name, last_name, phone, email, course, admission_pdf_base64, admission_pdf_filename
     )
@@ -846,7 +853,16 @@ def activity_logs(request: Request):
         except Exception:
             payload = {}
         action_type = r["action_type"]
-        undoable = (not bool(r["undone"])) and action_type in ("student_added", "attendance_recorded", "fee_recorded")
+        undoable = (not bool(r["undone"])) and action_type in (
+            "student_added",
+            "attendance_recorded",
+            "fee_recorded",
+            "timetable_created",
+            "interview_created",
+            "announcement_created",
+            "notification_created",
+            "admission_submitted",
+        )
         out.append({
             "activity_id": r["activity_id"],
             "action_type": action_type,
@@ -902,6 +918,37 @@ def activity_undo(payload: ActivityUndoRequest, request: Request):
             conn.close()
             raise HTTPException(status_code=400, detail="Undo payload missing fee_id")
         conn.execute("DELETE FROM fees WHERE fee_id = ?", (fee_id,))
+    elif action == "timetable_created":
+        timetable_id = int(p.get("timetable_id", 0) or 0)
+        if not timetable_id:
+            conn.close()
+            raise HTTPException(status_code=400, detail="Undo payload missing timetable_id")
+        conn.execute("DELETE FROM timetable WHERE timetable_id = ?", (timetable_id,))
+    elif action == "interview_created":
+        interview_id = int(p.get("interview_id", 0) or 0)
+        if not interview_id:
+            conn.close()
+            raise HTTPException(status_code=400, detail="Undo payload missing interview_id")
+        conn.execute("DELETE FROM interview_stats WHERE interview_id = ?", (interview_id,))
+    elif action == "announcement_created":
+        announcement_id = int(p.get("announcement_id", 0) or 0)
+        if not announcement_id:
+            conn.close()
+            raise HTTPException(status_code=400, detail="Undo payload missing announcement_id")
+        conn.execute("DELETE FROM announcements WHERE announcement_id = ?", (announcement_id,))
+    elif action == "notification_created":
+        notification_id = int(p.get("notification_id", 0) or 0)
+        if not notification_id:
+            conn.close()
+            raise HTTPException(status_code=400, detail="Undo payload missing notification_id")
+        conn.execute("DELETE FROM notifications WHERE notification_id = ?", (notification_id,))
+    elif action == "admission_submitted":
+        admission_id = int(p.get("admission_id", 0) or 0)
+        if not admission_id:
+            conn.close()
+            raise HTTPException(status_code=400, detail="Undo payload missing admission_id")
+        _ensure_admissions_table()
+        conn.execute("DELETE FROM admissions WHERE admission_id = ?", (admission_id,))
     else:
         conn.close()
         raise HTTPException(status_code=400, detail="This action is not undoable")
@@ -913,17 +960,25 @@ def activity_undo(payload: ActivityUndoRequest, request: Request):
 
 @app.post("/attendance/sync")
 def sync_attendance_from_excel(request: Request):
-    _require_superuser(_get_current_user(request))
+    user = _get_current_user(request)
+    _require_superuser(user)
     try:
         result = import_attendance(reset_attendance=True)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    _log_activity(
+        user,
+        "attendance_synced_excel",
+        f"Attendance synced from Excel ({result['inserted']} inserted, {result['skipped']} skipped)",
+        {"inserted": result["inserted"], "skipped": result["skipped"]},
+    )
     return {"status": "ok", "message": "Attendance synced from Excel", "inserted": result["inserted"], "skipped": result["skipped"]}
 
 
 @app.post("/attendance/sync/upload")
 async def sync_attendance_upload(file: UploadFile = File(...), request: Request = None):
-    _require_superuser(_get_current_user(request))
+    user = _get_current_user(request)
+    _require_superuser(user)
     filename = file.filename or ""
     if not filename.lower().endswith(".csv"):
         return {
@@ -976,6 +1031,12 @@ async def sync_attendance_upload(file: UploadFile = File(...), request: Request 
             skipped += 1
     conn.commit()
     conn.close()
+    _log_activity(
+        user,
+        "attendance_synced_csv",
+        f"Attendance synced from CSV ({inserted} inserted, {skipped} skipped)",
+        {"inserted": inserted, "skipped": skipped, "filename": filename},
+    )
     return {"status": "ok", "message": "Attendance synced from uploaded CSV", "inserted": inserted, "skipped": skipped}
 
 @app.post("/fees/record")
@@ -1220,9 +1281,10 @@ def list_timetable(request: Request, course: str = "", batch: str = ""):
 
 @app.post("/timetable")
 def create_timetable(entry: TimetableEntryRequest, request: Request):
-    _require_superuser(_get_current_user(request))
+    user = _get_current_user(request)
+    _require_superuser(user)
     conn = get_connection()
-    conn.execute(
+    cur = conn.execute(
         """
         INSERT INTO timetable
         (title, day_of_week, start_time, end_time, course, batch, location, instructor)
@@ -1239,8 +1301,15 @@ def create_timetable(entry: TimetableEntryRequest, request: Request):
             entry.instructor or "",
         ),
     )
+    timetable_id = cur.lastrowid
     conn.commit()
     conn.close()
+    _log_activity(
+        user,
+        "timetable_created",
+        f"Timetable entry added: {entry.title} ({entry.day_of_week})",
+        {"timetable_id": timetable_id, "title": entry.title, "day_of_week": entry.day_of_week},
+    )
     return {"status": "ok", "message": "Timetable entry created"}
 
 
@@ -1307,17 +1376,25 @@ def list_interviews(request: Request):
 
 @app.post("/interviews")
 def create_interview(entry: InterviewStatRequest, request: Request):
-    _require_superuser(_get_current_user(request))
+    user = _get_current_user(request)
+    _require_superuser(user)
     conn = get_connection()
-    conn.execute(
+    cur = conn.execute(
         """
         INSERT INTO interview_stats (airline_name, interview_date, notes)
         VALUES (?, ?, ?)
         """,
         (entry.airline_name, entry.interview_date, entry.notes or ""),
     )
+    interview_id = cur.lastrowid
     conn.commit()
     conn.close()
+    _log_activity(
+        user,
+        "interview_created",
+        f"Interview record added: {entry.airline_name} ({entry.interview_date})",
+        {"interview_id": interview_id, "airline_name": entry.airline_name, "interview_date": entry.interview_date},
+    )
     return {"status": "ok", "message": "Interview stat created"}
 
 
@@ -1342,15 +1419,22 @@ def create_announcement(payload: AnnouncementRequest, request: Request):
     user = _get_current_user(request)
     _require_superuser(user)
     conn = get_connection()
-    conn.execute(
+    cur = conn.execute(
         """
         INSERT INTO announcements (title, message, created_by)
         VALUES (?, ?, ?)
         """,
         (payload.title, payload.message, user["user"]),
     )
+    announcement_id = cur.lastrowid
     conn.commit()
     conn.close()
+    _log_activity(
+        user,
+        "announcement_created",
+        f"Announcement posted: {payload.title}",
+        {"announcement_id": announcement_id, "title": payload.title},
+    )
     return {"status": "ok", "message": "Announcement created"}
 
 
@@ -1379,9 +1463,10 @@ def list_notifications(request: Request, limit: int = 30):
 
 @app.post("/notifications")
 def create_notification(payload: NotificationRequest, request: Request):
-    _require_superuser(_get_current_user(request))
+    user = _get_current_user(request)
+    _require_superuser(user)
     conn = get_connection()
-    conn.execute(
+    cur = conn.execute(
         """
         INSERT INTO notifications (title, message, level, target_user)
         VALUES (?, ?, ?, ?)
@@ -1393,8 +1478,15 @@ def create_notification(payload: NotificationRequest, request: Request):
             payload.target_user,
         ),
     )
+    notification_id = cur.lastrowid
     conn.commit()
     conn.close()
+    _log_activity(
+        user,
+        "notification_created",
+        f"Notification created: {payload.title}",
+        {"notification_id": notification_id, "title": payload.title, "target_user": payload.target_user},
+    )
     return {"status": "ok", "message": "Notification created"}
 
 
