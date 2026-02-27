@@ -745,6 +745,9 @@ def record_attendance(payload: AttendanceSubmission, request: Request):
     _require_superuser(user)
     if not payload.records:
         raise HTTPException(status_code=400, detail="No attendance records provided")
+    today_iso = time.strftime("%Y-%m-%d")
+    if str(payload.date) > today_iso:
+        raise HTTPException(status_code=400, detail="Future attendance dates are not allowed")
 
     # Append to Excel
     if not EXCEL_PATH.exists():

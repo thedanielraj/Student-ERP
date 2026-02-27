@@ -482,8 +482,9 @@ function switchSection(target) {
   }
   localStorage.setItem("activeSection", target);
   if (target === "attendance") {
-    ensureTakeDate();
-    renderTakeAttendance();
+    ensureAttendanceDateConstraints();
+    renderTodayAttendance();
+    renderBackAttendance();
   }
   if (target === "fees") {
     renderFeesEntryList();
@@ -1035,74 +1036,124 @@ function formatDateDDMMYYYY(value) {
   return s;
 }
 
-function ensureTakeDate() {
-  const input = document.getElementById("takeDate");
-  if (!input.value) {
-    const today = new Date().toISOString().slice(0, 10);
-    input.value = today;
+function getTodayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function ensureAttendanceDateConstraints() {
+  const today = getTodayIso();
+  const backDate = document.getElementById("backDate");
+  const todayLabel = document.getElementById("todayAttendanceDate");
+  if (todayLabel) {
+    todayLabel.textContent = formatDateDDMMYYYY(today);
+  }
+  if (backDate) {
+    backDate.max = today;
+    if (!backDate.value) {
+      backDate.value = today;
+    } else if (backDate.value > today) {
+      backDate.value = today;
+    }
   }
 }
 
-function renderTakeAttendance() {
-  if (authInfo && authInfo.role === "student") {
-    return;
-  }
-  const date = document.getElementById("takeDate").value;
-  const body = document.getElementById("takeAttendanceBody");
+function getRollCallStudents() {
+  return allStudents.filter((s) => !alumniSelectedIds.has(String(s.student_id)));
+}
+
+function renderAttendanceForm(date, opts) {
+  const { bodyId, toggleClass, remarkClass, presentId, absentId, emptyMsg } = opts;
+  const body = document.getElementById(bodyId);
+  if (!body) return;
   body.innerHTML = "";
 
   if (!date) {
     body.innerHTML = `<tr><td colspan="4" class="empty">Select a date to load students</td></tr>`;
-    updateAttendanceCounts();
+    updateAttendanceCounts(toggleClass, presentId, absentId);
+    return;
+  }
+
+  if (date > getTodayIso()) {
+    body.innerHTML = `<tr><td colspan="4" class="empty">Future dates are not allowed</td></tr>`;
+    updateAttendanceCounts(toggleClass, presentId, absentId);
     return;
   }
 
   if (!allStudents.length) {
     body.innerHTML = `<tr><td colspan="4" class="empty">No students found</td></tr>`;
-    updateAttendanceCounts();
+    updateAttendanceCounts(toggleClass, presentId, absentId);
     return;
   }
 
-  const rollCallStudents = allStudents.filter((s) => !alumniSelectedIds.has(String(s.student_id)));
+  const rollCallStudents = getRollCallStudents();
   if (!rollCallStudents.length) {
-    body.innerHTML = `<tr><td colspan="4" class="empty">All current students are marked as alumni/selected. No roll call entries.</td></tr>`;
-    updateAttendanceCounts();
+    body.innerHTML = `<tr><td colspan="4" class="empty">${emptyMsg}</td></tr>`;
+    updateAttendanceCounts(toggleClass, presentId, absentId);
     return;
   }
 
-  rollCallStudents.forEach(s => {
+  rollCallStudents.forEach((s) => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${s.student_name} (ID: ${s.student_id})</td>
       <td>${s.batch}</td>
       <td>
         <label>
-          <input type="checkbox" class="present-toggle" data-id="${s.student_id}">
+          <input type="checkbox" class="${toggleClass}" data-id="${s.student_id}">
           Present
         </label>
       </td>
       <td>
-        <input class="remark-input" data-id="${s.student_id}" placeholder="Remarks (optional)" />
+        <input class="${remarkClass}" data-id="${s.student_id}" placeholder="Remarks (optional)" />
       </td>
     `;
     body.appendChild(tr);
   });
 
-  document.querySelectorAll(".present-toggle").forEach(cb => {
-    cb.addEventListener("change", updateAttendanceCounts);
+  document.querySelectorAll(`.${toggleClass}`).forEach((cb) => {
+    cb.addEventListener("change", () => updateAttendanceCounts(toggleClass, presentId, absentId));
   });
-  updateAttendanceCounts();
+  updateAttendanceCounts(toggleClass, presentId, absentId);
 }
 
-function updateAttendanceCounts() {
-  const toggles = document.querySelectorAll(".present-toggle");
+function renderTodayAttendance() {
+  if (authInfo && authInfo.role === "student") return;
+  ensureAttendanceDateConstraints();
+  renderAttendanceForm(getTodayIso(), {
+    bodyId: "todayAttendanceBody",
+    toggleClass: "today-present-toggle",
+    remarkClass: "today-remark-input",
+    presentId: "todayPresentCount",
+    absentId: "todayAbsentCount",
+    emptyMsg: "All current students are marked as alumni/selected. No roll call entries.",
+  });
+}
+
+function renderBackAttendance() {
+  if (authInfo && authInfo.role === "student") return;
+  ensureAttendanceDateConstraints();
+  const date = document.getElementById("backDate")?.value || "";
+  renderAttendanceForm(date, {
+    bodyId: "backAttendanceBody",
+    toggleClass: "back-present-toggle",
+    remarkClass: "back-remark-input",
+    presentId: "backPresentCount",
+    absentId: "backAbsentCount",
+    emptyMsg: "All current students are marked as alumni/selected. No roll call entries.",
+  });
+}
+
+function updateAttendanceCounts(toggleClass, presentId, absentId) {
+  const toggles = document.querySelectorAll(`.${toggleClass}`);
   let present = 0;
-  toggles.forEach(t => {
+  toggles.forEach((t) => {
     if (t.checked) present += 1;
   });
   const total = toggles.length;
-  document.getElementById("presentCount").textContent = present;
-  document.getElementById("absentCount").textContent = Math.max(total - present, 0);
+  const p = document.getElementById(presentId);
+  const a = document.getElementById(absentId);
+  if (p) p.textContent = String(present);
+  if (a) a.textContent = String(Math.max(total - present, 0));
 }
 
 function updateAttendancePercentFromRows(rows) {
@@ -1127,23 +1178,31 @@ function updateAttendancePercent(present, total) {
   if (metricEl) metricEl.textContent = pctText;
 }
 
-async function submitAttendance() {
+async function submitAttendanceForDate(date, opts) {
   if (authInfo && authInfo.role === "student") {
     return;
   }
-  const date = document.getElementById("takeDate").value;
   if (!date) {
     alert("Select a date first.");
+    return;
+  }
+  if (date > getTodayIso()) {
+    alert("Future dates are not allowed.");
     return;
   }
   if (!allStudents.length) {
     alert("No students to mark.");
     return;
   }
+  const rollCallStudents = getRollCallStudents();
+  if (!rollCallStudents.length) {
+    alert("No eligible students in roll call.");
+    return;
+  }
 
-  const records = allStudents.map(s => {
-    const isPresent = document.querySelector(`.present-toggle[data-id="${s.student_id}"]`)?.checked;
-    const remark = document.querySelector(`.remark-input[data-id="${s.student_id}"]`)?.value || "";
+  const records = rollCallStudents.map((s) => {
+    const isPresent = document.querySelector(`.${opts.toggleClass}[data-id="${s.student_id}"]`)?.checked;
+    const remark = document.querySelector(`.${opts.remarkClass}[data-id="${s.student_id}"]`)?.value || "";
     return {
       student_id: String(s.student_id),
       student_name: s.student_name,
@@ -1169,14 +1228,34 @@ async function submitAttendance() {
   const viewDate = document.getElementById("attendanceDate");
   viewDate.value = date;
   await loadAttendanceByDate();
-  document.querySelectorAll(".present-toggle").forEach(cb => {
+  document.querySelectorAll(`.${opts.toggleClass}`).forEach(cb => {
     cb.checked = false;
   });
-  document.querySelectorAll(".remark-input").forEach(input => {
+  document.querySelectorAll(`.${opts.remarkClass}`).forEach(input => {
     input.value = "";
   });
-  updateAttendanceCounts();
+  updateAttendanceCounts(opts.toggleClass, opts.presentId, opts.absentId);
   alert("Attendance recorded.");
+}
+
+async function submitTodayAttendance() {
+  await submitAttendanceForDate(getTodayIso(), {
+    toggleClass: "today-present-toggle",
+    remarkClass: "today-remark-input",
+    presentId: "todayPresentCount",
+    absentId: "todayAbsentCount",
+  });
+}
+
+async function submitBackAttendance() {
+  ensureAttendanceDateConstraints();
+  const date = document.getElementById("backDate")?.value || "";
+  await submitAttendanceForDate(date, {
+    toggleClass: "back-present-toggle",
+    remarkClass: "back-remark-input",
+    presentId: "backPresentCount",
+    absentId: "backAbsentCount",
+  });
 }
 
 async function initAuth() {
@@ -1312,6 +1391,10 @@ function applyRoleUI() {
   const takePanel = document.getElementById("takeAttendancePanel");
   if (takePanel) {
     takePanel.classList.toggle("hidden", isStudent);
+  }
+  const backdatePanel = document.getElementById("backdateAttendancePanel");
+  if (backdatePanel) {
+    backdatePanel.classList.toggle("hidden", isStudent);
   }
 
   const adminFees = document.getElementById("adminFeesPanel");

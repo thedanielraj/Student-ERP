@@ -507,6 +507,8 @@ async function attendanceRecord(request, session, env) {
   const date = String(body.date || "").trim();
   const records = Array.isArray(body.records) ? body.records : [];
   if (!date || !records.length) throw httpError(400, "Invalid payload");
+  const todayIso = new Date().toISOString().slice(0, 10);
+  if (date > todayIso) throw httpError(400, "Future attendance dates are not allowed");
   const stmt = env.DB.prepare(
     "INSERT OR IGNORE INTO attendance (student_id, student_name, course, batch, date, attendance_status, remarks) VALUES (?, ?, ?, ?, ?, ?, ?)"
   );

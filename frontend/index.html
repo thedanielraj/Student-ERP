@@ -305,17 +305,17 @@
         </section>
         <section id="takeAttendancePanel" class="panel">
           <div class="panel-header">
-            <h2>Take Attendance</h2>
+            <h2>Take Today's Attendance</h2>
             <span class="hint">Absent by default — toggle Present and add remarks</span>
           </div>
           <div class="form-row attendance-form">
-            <input id="takeDate" type="date" />
-            <button class="btn" onclick="renderTakeAttendance()">Load Students</button>
-            <button class="btn primary" onclick="submitAttendance()">Submit Attendance</button>
+            <div class="meta">Date: <strong id="todayAttendanceDate">-</strong></div>
+            <button class="btn" onclick="renderTodayAttendance()">Load Students</button>
+            <button class="btn primary" onclick="submitTodayAttendance()">Submit Today's Attendance</button>
           </div>
           <div class="attendance-meta">
-            <span>Present: <strong id="presentCount">0</strong></span>
-            <span>Absent: <strong id="absentCount">0</strong></span>
+            <span>Present: <strong id="todayPresentCount">0</strong></span>
+            <span>Absent: <strong id="todayAbsentCount">0</strong></span>
           </div>
           <div class="attendance-list">
             <table>
@@ -327,9 +327,9 @@
                   <th>Remarks</th>
                 </tr>
               </thead>
-              <tbody id="takeAttendanceBody">
+              <tbody id="todayAttendanceBody">
                 <tr>
-                  <td colspan="4" class="empty">Select a date to load students</td>
+                  <td colspan="4" class="empty">Load today's student list</td>
                 </tr>
               </tbody>
             </table>
@@ -405,6 +405,38 @@
               <div id="studentGatewayStatus">Checking payment gateway...</div>
               <button id="payNowBtn" class="btn primary hidden" onclick="payNowRazorpay()">Pay Now</button>
             </div>
+          </div>
+        </section>
+        <section id="backdateAttendancePanel" class="panel">
+          <div class="panel-header">
+            <h2>Take Past Attendance</h2>
+            <span class="hint">Use for missed entries. Future dates are blocked.</span>
+          </div>
+          <div class="form-row attendance-form">
+            <input id="backDate" type="date" />
+            <button class="btn" onclick="renderBackAttendance()">Load Date</button>
+            <button class="btn primary" onclick="submitBackAttendance()">Submit Backdated Attendance</button>
+          </div>
+          <div class="attendance-meta">
+            <span>Present: <strong id="backPresentCount">0</strong></span>
+            <span>Absent: <strong id="backAbsentCount">0</strong></span>
+          </div>
+          <div class="attendance-list">
+            <table>
+              <thead>
+                <tr>
+                  <th>Student</th>
+                  <th>Batch</th>
+                  <th>Present</th>
+                  <th>Remarks</th>
+                </tr>
+              </thead>
+              <tbody id="backAttendanceBody">
+                <tr>
+                  <td colspan="4" class="empty">Select a date to load students</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </section>
         <section class="panel">
