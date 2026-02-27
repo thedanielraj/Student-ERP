@@ -17,6 +17,9 @@ export async function onRequest(context) {
     if (path === "public/student-ids" && method === "GET") {
       return publicStudentIds(env);
     }
+    if (path === "public/alumni" && method === "GET") {
+      return publicAlumni(env);
+    }
     if (path === "admissions/apply" && method === "POST") {
       return admissionsApply(request, env);
     }
@@ -220,6 +223,19 @@ async function publicStudentIds(env) {
     "SELECT username FROM credentials WHERE role = 'student' AND upper(username) LIKE 'AAI%' ORDER BY username DESC"
   ).all();
   return json((rows.results || []).map((r) => r.username));
+}
+
+async function publicAlumni(env) {
+  const rows = await env.DB.prepare(
+    `SELECT student_id, student_name, MAX(date) AS last_selected_date
+     FROM attendance
+     WHERE remarks IS NOT NULL
+       AND trim(remarks) <> ''
+       AND lower(remarks) LIKE '%selected%'
+     GROUP BY student_id, student_name
+     ORDER BY last_selected_date DESC, student_name ASC`
+  ).all();
+  return json(rows.results || []);
 }
 
 async function ensureAdmissionsTable(env) {

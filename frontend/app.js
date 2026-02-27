@@ -10,6 +10,7 @@ let authInfo = null;
 let studentFeeSummary = null;
 let razorpayKeyId = null;
 let portalMode = "student";
+let alumniSelectedIds = new Set();
 
 async function loadStudents() {
   const res = await authFetch(`${API}/students`);
@@ -182,6 +183,7 @@ function setupTabs() {
 document.getElementById("search")?.addEventListener("input", renderStudentList);
 setupTabs();
 setupSidebarNav();
+loadProudAlumni();
 initAuth();
 
 async function loadStudentPortalLogins() {
@@ -237,6 +239,7 @@ function showHome() {
   document.getElementById("homeRoot")?.classList.remove("hidden");
   document.getElementById("loginRoot")?.classList.add("hidden");
   document.getElementById("appRoot")?.classList.add("hidden");
+  loadProudAlumni();
 }
 
 function toggleSidebar(scope) {
@@ -253,6 +256,32 @@ function showAdmissionForm() {
   const rows = document.querySelectorAll(".academic-row");
   if (!rows.length) {
     addAcademicRow();
+  }
+}
+
+async function loadProudAlumni() {
+  const list = document.getElementById("alumniList");
+  try {
+    const res = await fetch(`${API}/public/alumni`);
+    if (!res.ok) throw new Error("failed");
+    const rows = await res.json();
+    alumniSelectedIds = new Set((rows || []).map((r) => String(r.student_id || "")));
+    if (!list) return;
+    list.innerHTML = "";
+    if (!rows.length) {
+      list.innerHTML = `<li class="student-item"><strong>No alumni updates yet</strong></li>`;
+      return;
+    }
+    rows.forEach((r) => {
+      const li = document.createElement("li");
+      li.className = "student-item";
+      li.innerHTML = `<div><strong>${r.student_name || r.student_id}</strong></div><div class="student-meta">Selected on: ${formatDateDDMMYYYY(r.last_selected_date || "")}</div>`;
+      list.appendChild(li);
+    });
+  } catch (_) {
+    if (list) {
+      list.innerHTML = `<li class="student-item"><strong>Unable to load alumni right now</strong></li>`;
+    }
   }
 }
 
@@ -1034,7 +1063,14 @@ function renderTakeAttendance() {
     return;
   }
 
-  allStudents.forEach(s => {
+  const rollCallStudents = allStudents.filter((s) => !alumniSelectedIds.has(String(s.student_id)));
+  if (!rollCallStudents.length) {
+    body.innerHTML = `<tr><td colspan="4" class="empty">All current students are marked as alumni/selected. No roll call entries.</td></tr>`;
+    updateAttendanceCounts();
+    return;
+  }
+
+  rollCallStudents.forEach(s => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${s.student_name} (ID: ${s.student_id})</td>

@@ -360,7 +360,7 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
     if request.method == "OPTIONS":
         return await call_next(request)
-    if path in ["/", "/login", "/auth/me", "/public/student-ids", "/admissions/apply", "/docs", "/openapi.json", "/style.css", "/app.js"] or path.startswith("/static"):
+    if path in ["/", "/login", "/auth/me", "/public/student-ids", "/public/alumni", "/admissions/apply", "/docs", "/openapi.json", "/style.css", "/app.js"] or path.startswith("/static"):
         return await call_next(request)
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
@@ -444,6 +444,24 @@ def public_student_ids():
     ids = [u for u in passwords.keys() if u != "superuser" and str(u).upper().startswith("AAI")]
     ids.sort(reverse=True)
     return ids
+
+
+@app.get("/public/alumni")
+def public_alumni():
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT student_id, student_name, MAX(date) AS last_selected_date
+        FROM attendance
+        WHERE remarks IS NOT NULL
+          AND TRIM(remarks) <> ''
+          AND lower(remarks) LIKE '%selected%'
+        GROUP BY student_id, student_name
+        ORDER BY last_selected_date DESC, student_name ASC
+        """
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 def _ensure_admissions_table():
