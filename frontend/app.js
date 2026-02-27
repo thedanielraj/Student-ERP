@@ -11,6 +11,9 @@ let studentFeeSummary = null;
 let razorpayKeyId = null;
 let portalMode = "student";
 let alumniSelectedIds = new Set();
+let announcementPollTimer = null;
+let latestAnnouncementIdSeen = Number(localStorage.getItem("latestAnnouncementIdSeen") || 0);
+let announcementsNotifierBootstrapped = false;
 
 async function loadStudents() {
   const res = await authFetch(`${API}/students`);
@@ -240,6 +243,7 @@ function showHome() {
   document.getElementById("loginRoot")?.classList.add("hidden");
   document.getElementById("appRoot")?.classList.add("hidden");
   loadProudAlumni();
+  stopAnnouncementNotifier();
 }
 
 function toggleSidebar(scope) {
@@ -840,6 +844,59 @@ async function loadAnnouncements() {
   renderSimpleList("announcementList", rows.map(a => `${a.title} • ${a.message}`), "No announcements");
 }
 
+function stopAnnouncementNotifier() {
+  if (announcementPollTimer) {
+    clearInterval(announcementPollTimer);
+    announcementPollTimer = null;
+  }
+  announcementsNotifierBootstrapped = false;
+}
+
+async function initAnnouncementNotifier() {
+  stopAnnouncementNotifier();
+  if (!("Notification" in window)) return;
+  if (Notification.permission === "default") {
+    try {
+      await Notification.requestPermission();
+    } catch (_) {
+      return;
+    }
+  }
+  await checkForAnnouncementPush();
+  announcementPollTimer = setInterval(checkForAnnouncementPush, 30000);
+}
+
+async function checkForAnnouncementPush() {
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (!token) return;
+  const res = await authFetch(`${API}/announcements?limit=10`);
+  if (!res.ok) return;
+  const rows = await res.json();
+  if (!Array.isArray(rows) || !rows.length) return;
+  const sorted = [...rows].sort((a, b) => Number(a.announcement_id || 0) - Number(b.announcement_id || 0));
+  if (!announcementsNotifierBootstrapped) {
+    latestAnnouncementIdSeen = Math.max(latestAnnouncementIdSeen, Number(sorted[sorted.length - 1].announcement_id || 0));
+    localStorage.setItem("latestAnnouncementIdSeen", String(latestAnnouncementIdSeen));
+    announcementsNotifierBootstrapped = true;
+    return;
+  }
+  const newItems = sorted.filter((a) => Number(a.announcement_id || 0) > latestAnnouncementIdSeen);
+  if (!newItems.length) return;
+  latestAnnouncementIdSeen = Math.max(...newItems.map((a) => Number(a.announcement_id || 0)), latestAnnouncementIdSeen);
+  localStorage.setItem("latestAnnouncementIdSeen", String(latestAnnouncementIdSeen));
+  if (Notification.permission !== "granted") return;
+  for (const item of newItems) {
+    try {
+      new Notification(item.title || "New Announcement", {
+        body: item.message || "",
+        icon: "/assets/logo.png",
+      });
+    } catch (_) {
+      // no-op
+    }
+  }
+}
+
 async function addAnnouncement() {
   const payload = { title: value("anTitle"), message: value("anMessage") };
   if (!payload.title || !payload.message) {
@@ -1303,6 +1360,7 @@ function afterLoginInit() {
   } else {
     loadStudentFeeSummary();
   }
+  initAnnouncementNotifier();
   const savedSection = localStorage.getItem("activeSection") || (authInfo && authInfo.role === "student" ? "attendance" : "students");
   switchSection(savedSection);
 }
