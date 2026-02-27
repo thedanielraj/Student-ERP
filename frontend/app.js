@@ -858,7 +858,14 @@ async function loadActivityLogs() {
     body.innerHTML = `<tr><td colspan="6" class="empty">No activity yet</td></tr>`;
     return;
   }
-  rows.forEach((r) => {
+  const filter = (document.getElementById("activityFilter")?.value || "all").toLowerCase();
+  const filteredRows = (rows || []).filter((r) => matchesActivityFilter(r, filter));
+  if (!filteredRows.length) {
+    body.innerHTML = `<tr><td colspan="6" class="empty">No activity for selected filter</td></tr>`;
+    return;
+  }
+
+  filteredRows.forEach((r) => {
     const tr = document.createElement("tr");
     const created = formatDateTime(r.created_at);
     const status = r.undone ? `Undone ${formatDateTime(r.undone_at || "")}` : "Active";
@@ -872,6 +879,24 @@ async function loadActivityLogs() {
     `;
     body.appendChild(tr);
   });
+}
+
+function matchesActivityFilter(row, filter) {
+  if (filter === "all") return true;
+  const action = String(row?.action_type || "").toLowerCase();
+  if (filter === "attendance") {
+    return action.includes("attendance");
+  }
+  if (filter === "fees") {
+    return action.includes("fee");
+  }
+  if (filter === "admissions") {
+    return action.includes("admission");
+  }
+  if (filter === "content") {
+    return action.includes("announcement") || action.includes("notification") || action.includes("timetable") || action.includes("interview");
+  }
+  return true;
 }
 
 async function undoActivity(activityId) {

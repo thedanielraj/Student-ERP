@@ -650,6 +650,13 @@
             <p>All in-app actions with date and time</p>
           </div>
           <div class="top-actions">
+            <select id="activityFilter" onchange="loadActivityLogs()">
+              <option value="all">All</option>
+              <option value="attendance">Attendance</option>
+              <option value="fees">Fees</option>
+              <option value="admissions">Admissions</option>
+              <option value="content">Content</option>
+            </select>
             <button class="btn" onclick="loadActivityLogs()">Refresh</button>
           </div>
         </header>
