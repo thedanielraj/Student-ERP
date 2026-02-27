@@ -260,29 +260,39 @@ function showAdmissionForm() {
 }
 
 async function loadProudAlumni() {
-  const list = document.getElementById("alumniList");
+  const homeList = document.getElementById("alumniList");
+  const portalList = document.getElementById("portalAlumniList");
   try {
     const res = await fetch(`${API}/public/alumni`);
     if (!res.ok) throw new Error("failed");
     const rows = await res.json();
     alumniSelectedIds = new Set((rows || []).map((r) => String(r.student_id || "")));
-    if (!list) return;
-    list.innerHTML = "";
-    if (!rows.length) {
-      list.innerHTML = `<li class="student-item"><strong>No alumni updates yet</strong></li>`;
-      return;
-    }
-    rows.forEach((r) => {
-      const li = document.createElement("li");
-      li.className = "student-item";
-      li.innerHTML = `<div><strong>${r.student_name || r.student_id}</strong></div><div class="student-meta">Selected on: ${formatDateDDMMYYYY(r.last_selected_date || "")}</div>`;
-      list.appendChild(li);
-    });
+    renderAlumniList(homeList, rows);
+    renderAlumniList(portalList, rows);
   } catch (_) {
-    if (list) {
-      list.innerHTML = `<li class="student-item"><strong>Unable to load alumni right now</strong></li>`;
-    }
+    renderAlumniError(homeList);
+    renderAlumniError(portalList);
   }
+}
+
+function renderAlumniList(list, rows) {
+  if (!list) return;
+  list.innerHTML = "";
+  if (!rows.length) {
+    list.innerHTML = `<li class="student-item"><strong>No alumni updates yet</strong></li>`;
+    return;
+  }
+  rows.forEach((r) => {
+    const li = document.createElement("li");
+    li.className = "student-item";
+    li.innerHTML = `<div><strong>${r.student_name || r.student_id}</strong></div><div class="student-meta">Selected on: ${formatDateDDMMYYYY(r.last_selected_date || "")}</div>`;
+    list.appendChild(li);
+  });
+}
+
+function renderAlumniError(list) {
+  if (!list) return;
+  list.innerHTML = `<li class="student-item"><strong>Unable to load alumni right now</strong></li>`;
 }
 
 async function submitAdmissionForm() {
@@ -504,6 +514,9 @@ function switchSection(target) {
   }
   if (target === "notifications") {
     loadNotifications();
+  }
+  if (target === "alumni") {
+    loadProudAlumni();
   }
   if (target === "activity") {
     loadActivityLogs();

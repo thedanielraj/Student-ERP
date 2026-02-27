@@ -156,6 +156,7 @@
         <button class="nav-item" data-section="announcements">Announcements</button>
         <button class="nav-item" data-section="notifications">Notifications</button>
         <button class="nav-item" data-section="activity">Activity</button>
+        <button class="nav-item" data-section="alumni">Alumni</button>
         <button class="nav-item" data-section="reports">Reports</button>
       </nav>
       <button id="logoutBtn" class="btn logout-btn" onclick="logout()">Logout</button>
@@ -719,6 +720,23 @@
               </tr>
             </tbody>
           </table>
+        </section>
+      </section>
+
+      <section id="section-alumni" class="section hidden">
+        <header class="topbar">
+          <div>
+            <h1>Proud Alumni</h1>
+            <p>Students marked as selected</p>
+          </div>
+          <div class="top-actions">
+            <button class="btn" onclick="loadProudAlumni()">Refresh</button>
+          </div>
+        </header>
+        <section class="panel">
+          <ul id="portalAlumniList" class="student-list">
+            <li class="student-item"><strong>No alumni updates yet</strong></li>
+          </ul>
         </section>
       </section>
     </main>
