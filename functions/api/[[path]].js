@@ -39,6 +39,9 @@ export async function onRequest(context) {
 
     const session = await requireAuth(request, env);
 
+    if (path === "activity/logs" && method === "GET") return activityLogs(session, env);
+    if (path === "activity/undo" && method === "POST") return activityUndo(request, session, env);
+
     if (path === "students" && method === "GET") return listStudents(session, env);
     if (path === "students" && method === "POST") return addStudent(url, session, env);
 
@@ -138,6 +141,28 @@ async function ensureCredentials(env) {
       ).bind(row.student_id, random8Digits()).run();
     }
   }
+}
+
+async function ensureActivityTable(env) {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS activity_log (
+      activity_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      action_type TEXT NOT NULL,
+      description TEXT NOT NULL,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      undone INTEGER NOT NULL DEFAULT 0,
+      undone_at TEXT
+    )`
+  ).run();
+}
+
+async function writeActivity(env, session, actionType, description, payload = {}) {
+  await ensureActivityTable(env);
+  await env.DB.prepare(
+    "INSERT INTO activity_log (action_type, description, payload_json, created_by) VALUES (?, ?, ?, ?)"
+  ).bind(actionType, description, JSON.stringify(payload), session.user_id).run();
 }
 
 async function requireAuth(request, env) {
@@ -388,6 +413,13 @@ async function addStudent(url, session, env) {
   await env.DB.prepare(
     "INSERT INTO students (student_id, student_name, course, batch) VALUES (?, ?, ?, ?)"
   ).bind(sid, studentName, course, batch).run();
+  await writeActivity(
+    env,
+    session,
+    "student_added",
+    `Student added: ${studentName} (${sid})`,
+    { student_id: sid, student_name: studentName, course, batch }
+  );
   await ensureCredentials(env);
   return json({ status: "ok", message: "Student added", student_id: sid });
 }
@@ -454,9 +486,10 @@ async function attendanceRecord(request, session, env) {
   const stmt = env.DB.prepare(
     "INSERT OR IGNORE INTO attendance (student_id, student_name, course, batch, date, attendance_status, remarks) VALUES (?, ?, ?, ?, ?, ?, ?)"
   );
+  const insertedStudentIds = [];
   for (const r of records) {
     const normalizedStatus = normalizeAttendanceStatus(String(r.attendance_status || "A"));
-    await stmt.bind(
+    const result = await stmt.bind(
       String(r.student_id || ""),
       String(r.student_name || ""),
       String(r.course || ""),
@@ -465,7 +498,17 @@ async function attendanceRecord(request, session, env) {
       normalizedStatus,
       String(r.remarks || "")
     ).run();
+    if (result.success && Number(result.meta?.changes || 0) > 0) {
+      insertedStudentIds.push(String(r.student_id || ""));
+    }
   }
+  await writeActivity(
+    env,
+    session,
+    "attendance_recorded",
+    `Attendance recorded for ${date} (${insertedStudentIds.length} entries)`,
+    { date, student_ids: insertedStudentIds }
+  );
   return json({ status: "ok", message: "Attendance recorded", count: records.length });
 }
 
@@ -644,9 +687,17 @@ async function feesRecord(request, session, env) {
     });
     receiptPath = key;
   }
-  await env.DB.prepare(
+  const result = await env.DB.prepare(
     "INSERT INTO fees (student_id, amount_total, amount_paid, due_date, remarks, receipt_path) VALUES (?, ?, ?, ?, ?, ?)"
   ).bind(studentId, amountTotal, amountPaid, dueDate || null, remarks, receiptPath).run();
+  const feeId = Number(result.meta?.last_row_id || 0);
+  await writeActivity(
+    env,
+    session,
+    "fee_recorded",
+    `Fee recorded for ${studentId} (INR ${amountPaid})`,
+    { fee_id: feeId, student_id: studentId, amount_paid: amountPaid }
+  );
   return json({ status: "ok", message: "Fee recorded" });
 }
 
@@ -773,6 +824,71 @@ async function notificationsRead(notificationId, session, env) {
   await env.DB.prepare("INSERT OR IGNORE INTO notification_reads (notification_id, user_id) VALUES (?, ?)")
     .bind(notificationId, session.user_id).run();
   return json({ status: "ok" });
+}
+
+async function activityLogs(session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  await ensureActivityTable(env);
+  const rows = await env.DB.prepare(
+    "SELECT activity_id, action_type, description, payload_json, created_by, created_at, undone, undone_at FROM activity_log ORDER BY activity_id DESC LIMIT 200"
+  ).all();
+  const data = (rows.results || []).map((r) => {
+    let payload = {};
+    try { payload = JSON.parse(r.payload_json || "{}"); } catch (_) {}
+    return {
+      activity_id: r.activity_id,
+      action_type: r.action_type,
+      description: r.description,
+      payload,
+      created_by: r.created_by,
+      created_at: r.created_at,
+      undone: Boolean(r.undone),
+      undone_at: r.undone_at,
+      undoable: !r.undone && ["student_added", "attendance_recorded", "fee_recorded"].includes(r.action_type),
+    };
+  });
+  return json(data);
+}
+
+async function activityUndo(request, session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  await ensureActivityTable(env);
+  const body = await request.json();
+  const logId = Number(body.activity_id || 0);
+  if (!logId) throw httpError(400, "activity_id is required");
+
+  const row = await env.DB.prepare(
+    "SELECT activity_id, action_type, payload_json, undone FROM activity_log WHERE activity_id = ?"
+  ).bind(logId).first();
+  if (!row) throw httpError(404, "Activity not found");
+  if (Number(row.undone || 0) === 1) throw httpError(400, "Already undone");
+  let payload = {};
+  try { payload = JSON.parse(row.payload_json || "{}"); } catch (_) {}
+
+  if (row.action_type === "student_added") {
+    const sid = String(payload.student_id || "");
+    if (!sid) throw httpError(400, "Undo payload missing student_id");
+    await env.DB.prepare("DELETE FROM students WHERE student_id = ?").bind(sid).run();
+  } else if (row.action_type === "attendance_recorded") {
+    const date = String(payload.date || "");
+    const ids = Array.isArray(payload.student_ids) ? payload.student_ids : [];
+    if (!date || !ids.length) throw httpError(400, "Undo payload missing attendance details");
+    for (const sid of ids) {
+      await env.DB.prepare("DELETE FROM attendance WHERE student_id = ? AND date = ?").bind(String(sid), date).run();
+    }
+  } else if (row.action_type === "fee_recorded") {
+    const feeId = Number(payload.fee_id || 0);
+    if (!feeId) throw httpError(400, "Undo payload missing fee_id");
+    await env.DB.prepare("DELETE FROM fees WHERE fee_id = ?").bind(feeId).run();
+  } else {
+    throw httpError(400, "This action is not undoable");
+  }
+
+  await env.DB.prepare(
+    "UPDATE activity_log SET undone = 1, undone_at = datetime('now') WHERE activity_id = ?"
+  ).bind(logId).run();
+  await writeActivity(env, session, "undo_action", `Undid activity #${logId}`, { target_activity_id: logId });
+  return json({ status: "ok", message: "Undo successful" });
 }
 
 async function razorpayOrder(request, session, env) {

@@ -475,6 +475,9 @@ function switchSection(target) {
   if (target === "notifications") {
     loadNotifications();
   }
+  if (target === "activity") {
+    loadActivityLogs();
+  }
 }
 
 async function loadRecentAttendance() {
@@ -841,6 +844,58 @@ async function loadNotifications() {
   });
 }
 
+async function loadActivityLogs() {
+  const body = document.getElementById("activityBody");
+  if (!body) return;
+  const res = await authFetch(`${API}/activity/logs`);
+  if (!res.ok) {
+    body.innerHTML = `<tr><td colspan="6" class="empty">Failed to load activity logs</td></tr>`;
+    return;
+  }
+  const rows = await res.json();
+  body.innerHTML = "";
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="6" class="empty">No activity yet</td></tr>`;
+    return;
+  }
+  rows.forEach((r) => {
+    const tr = document.createElement("tr");
+    const created = formatDateTime(r.created_at);
+    const status = r.undone ? `Undone ${formatDateTime(r.undone_at || "")}` : "Active";
+    tr.innerHTML = `
+      <td>${created}</td>
+      <td>${r.action_type || "-"}</td>
+      <td>${r.description || "-"}</td>
+      <td>${r.created_by || "-"}</td>
+      <td>${status}</td>
+      <td>${r.undoable ? `<button class="btn" onclick="undoActivity(${r.activity_id})">Undo</button>` : "-"}</td>
+    `;
+    body.appendChild(tr);
+  });
+}
+
+async function undoActivity(activityId) {
+  if (!confirm("Undo this action?")) return;
+  const res = await authFetch(`${API}/activity/undo`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ activity_id: activityId }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "Undo failed.");
+    return;
+  }
+  await Promise.all([
+    loadActivityLogs(),
+    loadStudents(),
+    loadRecentAttendance(),
+    loadFeeSummary(),
+    loadReports(),
+  ]);
+  alert("Undo successful.");
+}
+
 async function addNotification() {
   const payload = {
     title: value("ntTitle"),
@@ -895,6 +950,16 @@ function clearInputs(ids) {
 function setText(id, text) {
   const el = document.getElementById(id);
   if (el) el.textContent = text;
+}
+
+function formatDateTime(value) {
+  const s = String(value || "").trim();
+  if (!s) return "-";
+  const dt = new Date(s.includes("T") ? s : `${s}Z`);
+  if (!Number.isNaN(dt.getTime())) {
+    return dt.toLocaleString("en-IN", { hour12: true });
+  }
+  return s;
 }
 
 function formatDateDDMMYYYY(value) {
@@ -1166,7 +1231,7 @@ function applyRoleUI() {
 
   document.querySelectorAll(".nav-item").forEach(btn => {
     const section = btn.dataset.section;
-    if (isStudent && (section === "students" || section === "reports")) {
+    if (isStudent && (section === "students" || section === "reports" || section === "activity")) {
       btn.classList.add("hidden");
     } else {
       btn.classList.remove("hidden");

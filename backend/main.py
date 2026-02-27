@@ -171,6 +171,10 @@ class AdmissionRequest(BaseModel):
     admission_pdf_base64: str = ""
     admission_pdf_filename: str = ""
 
+
+class ActivityUndoRequest(BaseModel):
+    activity_id: int
+
 def _create_session(username: str) -> str:
     token = uuid4().hex
     SESSIONS[token] = {"user": username, "last_activity": time.time()}
@@ -200,6 +204,38 @@ def _require_superuser(user: dict):
 def _require_self_or_superuser(user: dict, student_id: str):
     if user and not _is_superuser(user) and user["user"] != student_id:
         raise HTTPException(status_code=403, detail="Forbidden")
+
+
+def _ensure_activity_table():
+    conn = get_connection()
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS activity_log (
+            activity_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action_type TEXT NOT NULL,
+            description TEXT NOT NULL,
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            undone INTEGER NOT NULL DEFAULT 0,
+            undone_at TEXT
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+def _log_activity(user: dict, action_type: str, description: str, payload: dict):
+    _ensure_activity_table()
+    actor = (user or {}).get("user", "system")
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO activity_log (action_type, description, payload_json, created_by) VALUES (?, ?, ?, ?)",
+        (action_type, description, json.dumps(payload or {}), actor),
+    )
+    conn.commit()
+    conn.close()
 
 
 def _extract_airline_from_interview_remark(remark: str) -> str:
@@ -545,14 +581,22 @@ def list_students(request: Request):
 
 @app.post("/students")
 def add_student(student_name: str, course: str, batch: str, request: Request):
-    _require_superuser(_get_current_user(request))
+    user = _get_current_user(request)
+    _require_superuser(user)
     conn = get_connection()
-    conn.execute(
+    cur = conn.execute(
         "INSERT INTO students (student_name, course, batch) VALUES (?, ?, ?)",
         (student_name, course, batch),
     )
+    sid = str(cur.lastrowid)
     conn.commit()
     conn.close()
+    _log_activity(user, "student_added", f"Student added: {student_name} ({sid})", {
+        "student_id": sid,
+        "student_name": student_name,
+        "course": course,
+        "batch": batch,
+    })
     _ensure_passwords_for_students()
     return {"status": "ok", "message": "Student added"}
 
@@ -672,7 +716,8 @@ def attendance_by_date(date: str, request: Request):
 
 @app.post("/attendance/record")
 def record_attendance(payload: AttendanceSubmission, request: Request):
-    _require_superuser(_get_current_user(request))
+    user = _get_current_user(request)
+    _require_superuser(user)
     if not payload.records:
         raise HTTPException(status_code=400, detail="No attendance records provided")
 
@@ -705,6 +750,7 @@ def record_attendance(payload: AttendanceSubmission, request: Request):
 
     # Insert into DB (avoid duplicates by UNIQUE constraint)
     conn = get_connection()
+    inserted_ids = []
     for r in payload.records:
         conn.execute(
             """
@@ -714,7 +760,7 @@ def record_attendance(payload: AttendanceSubmission, request: Request):
             """,
             (r.student_id, r.student_name, r.course, r.batch),
         )
-        conn.execute(
+        cur = conn.execute(
             """
             INSERT OR IGNORE INTO attendance
             (student_id, student_name, course, batch, date, attendance_status, remarks)
@@ -722,8 +768,14 @@ def record_attendance(payload: AttendanceSubmission, request: Request):
             """,
             (r.student_id, r.student_name, r.course, r.batch, payload.date, r.attendance_status, r.remarks),
         )
+        if cur.rowcount:
+            inserted_ids.append(str(r.student_id))
     conn.commit()
     conn.close()
+    _log_activity(user, "attendance_recorded", f"Attendance recorded for {payload.date} ({len(inserted_ids)} entries)", {
+        "date": payload.date,
+        "student_ids": inserted_ids,
+    })
 
     return {"status": "ok", "message": "Attendance recorded", "count": len(payload.records)}
 
@@ -769,6 +821,95 @@ def auth_me(request: Request):
         "course": student["course"] if student else "",
         "batch": student["batch"] if student else "",
     }
+
+
+@app.get("/activity/logs")
+def activity_logs(request: Request):
+    user = _get_current_user(request)
+    _require_superuser(user)
+    _ensure_activity_table()
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT activity_id, action_type, description, payload_json, created_by, created_at, undone, undone_at
+        FROM activity_log
+        ORDER BY activity_id DESC
+        LIMIT 200
+        """
+    ).fetchall()
+    conn.close()
+    out = []
+    for r in rows:
+        payload = {}
+        try:
+            payload = json.loads(r["payload_json"] or "{}")
+        except Exception:
+            payload = {}
+        action_type = r["action_type"]
+        undoable = (not bool(r["undone"])) and action_type in ("student_added", "attendance_recorded", "fee_recorded")
+        out.append({
+            "activity_id": r["activity_id"],
+            "action_type": action_type,
+            "description": r["description"],
+            "payload": payload,
+            "created_by": r["created_by"],
+            "created_at": r["created_at"],
+            "undone": bool(r["undone"]),
+            "undone_at": r["undone_at"],
+            "undoable": undoable,
+        })
+    return out
+
+
+@app.post("/activity/undo")
+def activity_undo(payload: ActivityUndoRequest, request: Request):
+    user = _get_current_user(request)
+    _require_superuser(user)
+    _ensure_activity_table()
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT activity_id, action_type, payload_json, undone FROM activity_log WHERE activity_id = ?",
+        (payload.activity_id,),
+    ).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Activity not found")
+    if int(row["undone"] or 0) == 1:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Already undone")
+    try:
+        p = json.loads(row["payload_json"] or "{}")
+    except Exception:
+        p = {}
+    action = row["action_type"]
+    if action == "student_added":
+        sid = str(p.get("student_id", "")).strip()
+        if not sid:
+            conn.close()
+            raise HTTPException(status_code=400, detail="Undo payload missing student_id")
+        conn.execute("DELETE FROM students WHERE student_id = ?", (sid,))
+    elif action == "attendance_recorded":
+        date = str(p.get("date", "")).strip()
+        student_ids = p.get("student_ids", []) if isinstance(p.get("student_ids", []), list) else []
+        if not date or not student_ids:
+            conn.close()
+            raise HTTPException(status_code=400, detail="Undo payload missing attendance details")
+        for sid in student_ids:
+            conn.execute("DELETE FROM attendance WHERE student_id = ? AND date = ?", (str(sid), date))
+    elif action == "fee_recorded":
+        fee_id = int(p.get("fee_id", 0) or 0)
+        if not fee_id:
+            conn.close()
+            raise HTTPException(status_code=400, detail="Undo payload missing fee_id")
+        conn.execute("DELETE FROM fees WHERE fee_id = ?", (fee_id,))
+    else:
+        conn.close()
+        raise HTTPException(status_code=400, detail="This action is not undoable")
+    conn.execute("UPDATE activity_log SET undone = 1, undone_at = datetime('now') WHERE activity_id = ?", (payload.activity_id,))
+    conn.commit()
+    conn.close()
+    _log_activity(user, "undo_action", f"Undid activity #{payload.activity_id}", {"target_activity_id": payload.activity_id})
+    return {"status": "ok", "message": "Undo successful"}
 
 @app.post("/attendance/sync")
 def sync_attendance_from_excel(request: Request):
@@ -847,7 +988,8 @@ async def record_fee(
     receipt: UploadFile = File(None),
     request: Request = None,
 ):
-    _require_superuser(_get_current_user(request))
+    user = _get_current_user(request)
+    _require_superuser(user)
     if amount_total is None:
         amount_total = amount_paid
 
@@ -862,15 +1004,21 @@ async def record_fee(
         receipt_path = str(save_path)
 
     conn = get_connection()
-    conn.execute(
+    cur = conn.execute(
         """
         INSERT INTO fees (student_id, amount_total, amount_paid, due_date, remarks, receipt_path)
         VALUES (?, ?, ?, ?, ?, ?)
         """,
         (student_id, amount_total, amount_paid, due_date, remarks, receipt_path),
     )
+    fee_id = cur.lastrowid
     conn.commit()
     conn.close()
+    _log_activity(user, "fee_recorded", f"Fee recorded for {student_id} (INR {amount_paid})", {
+        "fee_id": fee_id,
+        "student_id": str(student_id),
+        "amount_paid": amount_paid,
+    })
 
     return {"status": "ok", "message": "Fee recorded"}
 

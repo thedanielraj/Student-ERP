@@ -146,6 +146,7 @@
         <button class="nav-item" data-section="interviews">Interviews</button>
         <button class="nav-item" data-section="announcements">Announcements</button>
         <button class="nav-item" data-section="notifications">Notifications</button>
+        <button class="nav-item" data-section="activity">Activity</button>
         <button class="nav-item" data-section="reports">Reports</button>
       </nav>
       <button id="logoutBtn" class="btn logout-btn" onclick="logout()">Logout</button>
@@ -639,6 +640,37 @@
               </div>
             </div>
           </div>
+        </section>
+      </section>
+
+      <section id="section-activity" class="section hidden">
+        <header class="topbar">
+          <div>
+            <h1>Activity Log</h1>
+            <p>All in-app actions with date and time</p>
+          </div>
+          <div class="top-actions">
+            <button class="btn" onclick="loadActivityLogs()">Refresh</button>
+          </div>
+        </header>
+        <section class="panel">
+          <table>
+            <thead>
+              <tr>
+                <th>Date/Time</th>
+                <th>Action</th>
+                <th>Description</th>
+                <th>By</th>
+                <th>Status</th>
+                <th>Undo</th>
+              </tr>
+            </thead>
+            <tbody id="activityBody">
+              <tr>
+                <td colspan="6" class="empty">No activity yet</td>
+              </tr>
+            </tbody>
+          </table>
         </section>
       </section>
     </main>
