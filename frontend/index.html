@@ -151,10 +151,12 @@
         <button class="nav-item active" data-section="students">Students</button>
         <button class="nav-item" data-section="attendance">Attendance</button>
         <button class="nav-item" data-section="fees">Fees</button>
+        <button class="nav-item" data-section="tests">Tests</button>
         <button class="nav-item" data-section="timetable">Timetable</button>
         <button class="nav-item" data-section="interviews">Interviews</button>
         <button class="nav-item" data-section="announcements">Announcements</button>
         <button class="nav-item" data-section="notifications">Notifications</button>
+        <button class="nav-item" data-section="admissions">Admissions</button>
         <button class="nav-item" data-section="activity">Activity</button>
         <button class="nav-item" data-section="alumni">Alumni</button>
         <button class="nav-item" data-section="reports">Reports</button>
@@ -185,12 +187,26 @@
             <button class="btn" onclick="loadStudents()">Refresh</button>
           </div>
         </header>
+        <section id="studentBulkPanel" class="panel">
+          <div class="panel-header">
+            <h2>Staff Controls</h2>
+            <span class="hint">Selected: <strong id="selectedStudentCount">0</strong></span>
+          </div>
+          <div class="form-row">
+            <select id="bulkBatchSelect">
+              <option value="">Move selected to batch...</option>
+            </select>
+            <button class="btn" onclick="bulkMoveBatch()">Move Batch</button>
+            <button class="btn" onclick="bulkMarkAlumni()">Mark Alumni</button>
+            <button class="btn" onclick="bulkDeleteStudents()">Delete Selected</button>
+          </div>
+        </section>
 
         <section class="grid">
           <div class="panel list-panel">
             <div class="panel-header">
               <h2>Students</h2>
-              <span class="hint">Select to open profile</span>
+              <span class="hint">Use checkbox for bulk actions</span>
             </div>
             <ul id="studentList" class="student-list"></ul>
           </div>
@@ -253,11 +269,12 @@
                     <th>Paid</th>
                     <th>Due</th>
                     <th>Remarks</th>
+                    <th>Invoice</th>
                   </tr>
                 </thead>
                 <tbody id="feesBody">
                   <tr>
-                    <td colspan="5" class="empty">No fees loaded</td>
+                    <td colspan="6" class="empty">No fees loaded</td>
                   </tr>
                 </tbody>
               </table>
@@ -273,7 +290,8 @@
           <div class="form-row">
             <input id="name" placeholder="Student Name" />
             <input id="course" placeholder="Course (Ground/Cabin Crew)" />
-            <input id="batch" placeholder="Batch (Mike/November/Oscar/Papa)" />
+            <input id="batch" list="natoBatchList" placeholder="Batch (NATO naming)" />
+            <datalist id="natoBatchList"></datalist>
             <button class="btn primary" onclick="addStudent()">Add Student</button>
           </div>
         </section>
@@ -487,6 +505,88 @@
         </section>
       </section>
 
+      <section id="section-tests" class="section hidden">
+        <header class="topbar">
+          <div>
+            <h1>Tests</h1>
+            <p>Create, assign, and monitor student assessments</p>
+          </div>
+          <div class="top-actions">
+            <button class="btn" onclick="loadTests()">Refresh</button>
+          </div>
+        </header>
+
+        <section id="adminTestsPanel" class="panel">
+          <div class="panel-header">
+            <h2>Create Test</h2>
+          </div>
+          <div class="form-row">
+            <input id="testTitle" placeholder="Test title" />
+            <input id="testDescription" placeholder="Description" />
+            <input id="testDuration" type="number" min="5" value="30" placeholder="Duration (minutes)" />
+            <input id="testAssignedStudents" placeholder="Assign IDs (comma separated, blank = all students)" />
+            <button class="btn primary" onclick="createTest()">Create Test</button>
+          </div>
+          <div class="panel-header">
+            <h2>Questions</h2>
+            <button class="btn" onclick="addTestQuestionRow()">Add Question</button>
+          </div>
+          <div id="testQuestionRows"></div>
+        </section>
+
+        <section id="studentTestsPanel" class="panel hidden">
+          <div class="panel-header">
+            <h2>My Tests</h2>
+            <span class="hint">Complete tests inside portal only</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Test</th>
+                <th>Duration</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="studentTestsBody">
+              <tr><td colspan="4" class="empty">No tests assigned</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="testAttemptPanel" class="panel hidden">
+          <div class="panel-header">
+            <h2 id="attemptTestTitle">Attempt</h2>
+            <span id="attemptTimer" class="hint">Time left: --:--</span>
+          </div>
+          <div id="attemptQuestions"></div>
+          <div class="top-actions">
+            <button class="btn primary" onclick="submitCurrentAttempt()">Submit Test</button>
+          </div>
+        </section>
+
+        <section id="adminTestsListPanel" class="panel">
+          <div class="panel-header">
+            <h2>All Tests</h2>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Title</th>
+                <th>Questions</th>
+                <th>Assignments</th>
+                <th>Attempts</th>
+                <th>Malpractice</th>
+              </tr>
+            </thead>
+            <tbody id="adminTestsBody">
+              <tr><td colspan="6" class="empty">No tests created</td></tr>
+            </tbody>
+          </table>
+        </section>
+      </section>
+
       <section id="section-feed" class="section hidden">
         <header class="topbar">
           <div>
@@ -543,7 +643,7 @@
             <input id="ttStart" placeholder="Start (09:00)" />
             <input id="ttEnd" placeholder="End (10:30)" />
             <input id="ttCourse" placeholder="Course" />
-            <input id="ttBatch" placeholder="Batch" />
+            <input id="ttBatch" list="natoBatchList" placeholder="Batch" />
             <input id="ttLocation" placeholder="Location" />
             <input id="ttInstructor" placeholder="Instructor" />
             <button class="btn primary" onclick="addTimetable()">Add</button>
@@ -630,6 +730,37 @@
         </section>
         <section class="panel">
           <ul id="notificationList" class="student-list"></ul>
+        </section>
+      </section>
+
+      <section id="section-admissions" class="section hidden">
+        <header class="topbar">
+          <div>
+            <h1>Admissions</h1>
+            <p>Review submitted admission forms and open stored PDFs</p>
+          </div>
+          <div class="top-actions">
+            <button class="btn" onclick="loadAdmissions()">Refresh</button>
+          </div>
+        </header>
+        <section class="panel">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Course</th>
+                <th>Phone</th>
+                <th>Email</th>
+                <th>Submitted</th>
+                <th>PDF</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="admissionsBody">
+              <tr><td colspan="8" class="empty">No admissions found</td></tr>
+            </tbody>
+          </table>
         </section>
       </section>
 

@@ -27,6 +27,7 @@ Thumbs.db
 # Environment files
 .env
 .env.*
+.dev.vars
 
 # Cloudflare local state
 .wrangler/

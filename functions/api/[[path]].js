@@ -21,7 +21,7 @@ export async function onRequest(context) {
       return publicAlumni(env);
     }
     if (path === "admissions/apply" && method === "POST") {
-      return admissionsApply(request, env);
+      return await admissionsApply(request, env);
     }
     if (path === "login" && method === "POST") {
       return handleLogin(request, env);
@@ -47,6 +47,9 @@ export async function onRequest(context) {
 
     if (path === "students" && method === "GET") return listStudents(session, env);
     if (path === "students" && method === "POST") return addStudent(url, session, env);
+    if (path === "students/bulk-batch" && method === "POST") return studentsBulkBatch(request, session, env);
+    if (path === "students/mark-alumni" && method === "POST") return studentsMarkAlumni(request, session, env);
+    if (path === "students/delete" && method === "POST") return studentsDelete(request, session, env);
 
     if (path.startsWith("students/") && path.endsWith("/balance") && method === "GET") {
       const studentId = path.split("/")[1];
@@ -70,6 +73,28 @@ export async function onRequest(context) {
     if (path === "fees/recent" && method === "GET") return feesRecent(session, env);
     if (path === "fees/summary" && method === "GET") return feesSummary(session, env);
     if (path === "fees/record" && method === "POST") return feesRecord(request, session, env);
+    if (/^fees\/\d+\/invoice$/.test(path) && method === "GET") {
+      const feeId = Number(path.split("/")[1]);
+      return feeInvoice(feeId, session, env);
+    }
+    if (path === "tests" && method === "GET") return testsList(session, env);
+    if (path === "tests" && method === "POST") return testsCreate(request, session, env);
+    if (/^tests\/\d+$/.test(path) && method === "GET") {
+      const id = Number(path.split("/")[1]);
+      return testDetail(id, session, env);
+    }
+    if (/^tests\/\d+\/start$/.test(path) && method === "POST") {
+      const id = Number(path.split("/")[1]);
+      return testStart(id, session, env);
+    }
+    if (/^tests\/attempts\/\d+\/submit$/.test(path) && method === "POST") {
+      const id = Number(path.split("/")[2]);
+      return testSubmit(id, request, session, env);
+    }
+    if (/^tests\/attempts\/\d+\/malpractice$/.test(path) && method === "POST") {
+      const id = Number(path.split("/")[2]);
+      return testMalpractice(id, request, session, env);
+    }
 
     if (path === "payments/razorpay/order" && method === "POST") return razorpayOrder(request, session, env);
     if (path === "payments/razorpay/verify" && method === "POST") return razorpayVerify(request, session, env);
@@ -91,6 +116,15 @@ export async function onRequest(context) {
     if (/^notifications\/\d+\/read$/.test(path) && method === "POST") {
       const id = Number(path.split("/")[1]);
       return notificationsRead(id, session, env);
+    }
+    if (path === "admissions" && method === "GET") return await admissionsList(session, env);
+    if (/^admissions\/\d+\/pdf$/.test(path) && method === "GET") {
+      const id = Number(path.split("/")[1]);
+      return await admissionsPdf(id, session, env);
+    }
+    if (/^admissions\/\d+$/.test(path) && method === "DELETE") {
+      const id = Number(path.split("/")[1]);
+      return await admissionsDelete(id, session, env);
     }
 
     return json({ detail: "Not found" }, 404);
@@ -226,22 +260,37 @@ async function publicStudentIds(env) {
 }
 
 async function publicAlumni(env) {
-  const rows = await env.DB.prepare(
+  const selectedRows = await env.DB.prepare(
     `SELECT student_id, student_name, MAX(date) AS last_selected_date
      FROM attendance
      WHERE remarks IS NOT NULL
        AND trim(remarks) <> ''
        AND lower(remarks) LIKE '%selected%'
-     GROUP BY student_id, student_name
-     ORDER BY last_selected_date DESC, student_name ASC`
+     GROUP BY student_id, student_name`
   ).all();
-  return json(rows.results || []);
+  const alumniRows = await env.DB.prepare(
+    `SELECT student_id, student_name, NULL AS last_selected_date
+     FROM students
+     WHERE lower(COALESCE(status, 'active')) = 'alumni'`
+  ).all();
+  const byId = new Map();
+  for (const row of [...(selectedRows.results || []), ...(alumniRows.results || [])]) {
+    byId.set(String(row.student_id), row);
+  }
+  const rows = Array.from(byId.values()).sort((a, b) => {
+    const aDate = String(a.last_selected_date || "");
+    const bDate = String(b.last_selected_date || "");
+    if (aDate !== bDate) return bDate.localeCompare(aDate);
+    return String(a.student_name || "").localeCompare(String(b.student_name || ""));
+  });
+  return json(rows);
 }
 
 async function ensureAdmissionsTable(env) {
   await env.DB.prepare(
     `CREATE TABLE IF NOT EXISTS admissions (
       admission_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      full_name TEXT NOT NULL DEFAULT '',
       first_name TEXT NOT NULL,
       middle_name TEXT,
       last_name TEXT NOT NULL,
@@ -264,6 +313,8 @@ async function ensureAdmissionsTable(env) {
       permanent_address TEXT,
       course TEXT NOT NULL,
       academic_details_json TEXT NOT NULL DEFAULT '[]',
+      admission_pdf_r2_key TEXT,
+      admission_pdf_bytes INTEGER,
       status TEXT NOT NULL DEFAULT 'new',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`
@@ -271,6 +322,7 @@ async function ensureAdmissionsTable(env) {
   const cols = await env.DB.prepare("PRAGMA table_info(admissions)").all();
   const existing = new Set((cols.results || []).map((c) => c.name));
   const expected = {
+    full_name: "TEXT NOT NULL DEFAULT ''",
     first_name: "TEXT",
     middle_name: "TEXT",
     last_name: "TEXT",
@@ -293,6 +345,8 @@ async function ensureAdmissionsTable(env) {
     permanent_address: "TEXT",
     course: "TEXT",
     academic_details_json: "TEXT NOT NULL DEFAULT '[]'",
+    admission_pdf_r2_key: "TEXT",
+    admission_pdf_bytes: "INTEGER",
     status: "TEXT",
     created_at: "TEXT",
   };
@@ -301,6 +355,40 @@ async function ensureAdmissionsTable(env) {
       await env.DB.prepare(`ALTER TABLE admissions ADD COLUMN ${col} ${typeSql}`).run();
     }
   }
+}
+
+function decodeBase64ToBytes(base64) {
+  const clean = String(base64 || "").replace(/\s+/g, "");
+  if (!clean) return new Uint8Array(0);
+  const bin = atob(clean);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+function sanitizePdfFilename(name) {
+  const raw = String(name || "").trim();
+  const base = raw ? raw.replace(/[^a-zA-Z0-9._-]/g, "_") : `admission_${Date.now()}.pdf`;
+  return base.toLowerCase().endsWith(".pdf") ? base : `${base}.pdf`;
+}
+
+async function uploadAdmissionPdfToR2(env, pdfBytes, originalFilename) {
+  if (!pdfBytes || !pdfBytes.length) return { stored: false, key: null };
+  if (!env.ERP_FILES || typeof env.ERP_FILES.put !== "function") {
+    return { stored: false, key: null };
+  }
+  const filename = sanitizePdfFilename(originalFilename);
+  const now = new Date();
+  const yyyy = String(now.getUTCFullYear());
+  const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const key = `admissions/${yyyy}/${mm}/${crypto.randomUUID()}_${filename}`;
+  await env.ERP_FILES.put(key, pdfBytes, {
+    httpMetadata: {
+      contentType: "application/pdf",
+      contentDisposition: `inline; filename="${filename}"`,
+    },
+  });
+  return { stored: true, key };
 }
 
 async function sendAdmissionEmail(env, payload, pdfBase64, pdfFileName) {
@@ -347,6 +435,7 @@ async function admissionsApply(request, env) {
   const firstName = String(b.first_name || "").trim();
   const middleName = String(b.middle_name || "").trim();
   const lastName = String(b.last_name || "").trim();
+  const fullName = [firstName, middleName, lastName].filter(Boolean).join(" ").trim();
   const phone = String(b.phone || "").trim();
   const email = String(b.email || "").trim();
   const bloodGroup = String(b.blood_group || "").trim();
@@ -367,19 +456,36 @@ async function admissionsApply(request, env) {
   const course = String(b.course || "").trim();
   const admissionPdfBase64 = String(b.admission_pdf_base64 || "").trim();
   const admissionPdfFilename = String(b.admission_pdf_filename || "").trim();
+  const maxPdfBytes = 1024 * 1024;
+  let admissionPdfBytes = new Uint8Array(0);
+  if (admissionPdfBase64) {
+    try {
+      admissionPdfBytes = decodeBase64ToBytes(admissionPdfBase64);
+    } catch (_) {
+      throw httpError(400, "Invalid admission PDF");
+    }
+    if (admissionPdfBytes.length > maxPdfBytes) {
+      throw httpError(413, "Admission PDF must be less than 1 MB");
+    }
+  }
+  const storedPdf = await uploadAdmissionPdfToR2(env, admissionPdfBytes, admissionPdfFilename);
   const academicDetails = Array.isArray(b.academic_details) ? b.academic_details : [];
   const academicDetailsJson = JSON.stringify(academicDetails);
   if (!firstName || !lastName || !phone || !email || !course) throw httpError(400, "Missing required fields");
   const ins = await env.DB.prepare(
     `INSERT INTO admissions (
+      full_name,
       first_name, middle_name, last_name, phone, email, blood_group, age, dob, aadhaar_number, nationality,
       father_name, father_phone, father_occupation, father_email, mother_name, mother_phone, mother_occupation, mother_email,
-      correspondence_address, permanent_address, course, academic_details_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      correspondence_address, permanent_address, course, academic_details_json, admission_pdf_r2_key, admission_pdf_bytes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
+    fullName,
     firstName, middleName, lastName, phone, email, bloodGroup, age, dob, aadhaarNumber, nationality,
     fatherName, fatherPhone, fatherOccupation, fatherEmail, motherName, motherPhone, motherOccupation, motherEmail,
-    correspondenceAddress, permanentAddress, course, academicDetailsJson
+    correspondenceAddress, permanentAddress, course, academicDetailsJson,
+    storedPdf.key,
+    Number(admissionPdfBytes.length || 0)
   ).run();
   const admissionId = Number(ins.meta?.last_row_id || 0);
   await writeActivity(
@@ -387,7 +493,16 @@ async function admissionsApply(request, env) {
     { user_id: "public_admission_form" },
     "admission_submitted",
     `Admission submitted: ${firstName} ${lastName} (${course})`,
-    { admission_id: admissionId, first_name: firstName, last_name: lastName, course, phone, email }
+    {
+      admission_id: admissionId,
+      first_name: firstName,
+      last_name: lastName,
+      course,
+      phone,
+      email,
+      admission_pdf_r2_key: storedPdf.key,
+      admission_pdf_bytes: Number(admissionPdfBytes.length || 0),
+    }
   );
   const emailResult = await sendAdmissionEmail(
     env,
@@ -399,7 +514,90 @@ async function admissionsApply(request, env) {
     status: "ok",
     message: "Admission form submitted",
     email_sent: emailResult.sent,
+    pdf_stored: storedPdf.stored,
+    pdf_bytes: Number(admissionPdfBytes.length || 0),
   });
+}
+
+async function admissionsList(session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  await ensureAdmissionsTable(env);
+  const rows = await env.DB.prepare(
+    `SELECT
+      admission_id,
+      first_name,
+      middle_name,
+      last_name,
+      course,
+      phone,
+      email,
+      created_at,
+      admission_pdf_r2_key,
+      admission_pdf_bytes
+    FROM admissions
+    ORDER BY admission_id DESC
+    LIMIT 500`
+  ).all();
+  const data = (rows.results || []).map((r) => {
+    const fullName = [r.first_name, r.middle_name, r.last_name].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+    return {
+      admission_id: r.admission_id,
+      full_name: fullName,
+      course: r.course || "",
+      phone: r.phone || "",
+      email: r.email || "",
+      created_at: r.created_at || "",
+      pdf_available: Boolean(r.admission_pdf_r2_key),
+      pdf_bytes: Number(r.admission_pdf_bytes || 0),
+    };
+  });
+  return json(data);
+}
+
+async function admissionsPdf(admissionId, session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  if (!admissionId) throw httpError(400, "Invalid admission id");
+  await ensureAdmissionsTable(env);
+  const row = await env.DB.prepare(
+    "SELECT admission_pdf_r2_key, first_name, last_name FROM admissions WHERE admission_id = ?"
+  ).bind(admissionId).first();
+  if (!row) throw httpError(404, "Admission not found");
+  const key = String(row.admission_pdf_r2_key || "").trim();
+  if (!key) throw httpError(404, "Admission PDF not found");
+  if (!env.ERP_FILES || typeof env.ERP_FILES.get !== "function") {
+    throw httpError(503, "R2 is not configured");
+  }
+  const object = await env.ERP_FILES.get(key);
+  if (!object || !object.body) throw httpError(404, "Admission PDF not found in storage");
+  const safeFirst = String(row.first_name || "admission").replace(/[^a-zA-Z0-9._-]/g, "_");
+  const safeLast = String(row.last_name || "").replace(/[^a-zA-Z0-9._-]/g, "_");
+  const filename = `${safeFirst}${safeLast ? "_" + safeLast : ""}_${admissionId}.pdf`;
+  return new Response(object.body, {
+    status: 200,
+    headers: {
+      "content-type": "application/pdf",
+      "content-disposition": `inline; filename="${filename}"`,
+      "cache-control": "private, max-age=60",
+    },
+  });
+}
+
+async function admissionsDelete(admissionId, session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  if (!admissionId) throw httpError(400, "Invalid admission id");
+  await ensureAdmissionsTable(env);
+  const row = await env.DB.prepare("SELECT * FROM admissions WHERE admission_id = ?").bind(admissionId).first();
+  if (!row) throw httpError(404, "Admission not found");
+  await env.DB.prepare("DELETE FROM admissions WHERE admission_id = ?").bind(admissionId).run();
+  const fullName = String(row.full_name || [row.first_name, row.middle_name, row.last_name].filter(Boolean).join(" "));
+  await writeActivity(
+    env,
+    session,
+    "admission_deleted",
+    `Deleted admission #${admissionId}${fullName ? ` (${fullName})` : ""}`,
+    { admission: row }
+  );
+  return json({ status: "ok", message: "Admission deleted" });
 }
 
 async function studentFinancials(env, studentId) {
@@ -415,6 +613,321 @@ async function studentFinancials(env, studentId) {
   const paid = Number(fee.paid || 0);
   const due = Math.max(total - paid, 0);
   return { student, total, paid, due, transactions: Number(fee.transactions || 0) };
+}
+
+async function ensureTestsTables(env) {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS tests (
+      test_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      description TEXT,
+      duration_minutes INTEGER NOT NULL DEFAULT 30,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`
+  ).run();
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS test_questions (
+      question_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      test_id INTEGER NOT NULL,
+      question_order INTEGER NOT NULL,
+      question_text TEXT NOT NULL,
+      question_type TEXT NOT NULL DEFAULT 'mcq',
+      option_a TEXT,
+      option_b TEXT,
+      option_c TEXT,
+      option_d TEXT,
+      correct_answer TEXT,
+      points INTEGER NOT NULL DEFAULT 1,
+      FOREIGN KEY (test_id) REFERENCES tests(test_id) ON DELETE CASCADE
+    )`
+  ).run();
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS test_assignments (
+      test_id INTEGER NOT NULL,
+      student_id TEXT NOT NULL,
+      assigned_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (test_id, student_id)
+    )`
+  ).run();
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS test_attempts (
+      attempt_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      test_id INTEGER NOT NULL,
+      student_id TEXT NOT NULL,
+      start_time TEXT NOT NULL DEFAULT (datetime('now')),
+      submitted_at TEXT,
+      status TEXT NOT NULL DEFAULT 'in_progress',
+      score REAL NOT NULL DEFAULT 0,
+      total_points REAL NOT NULL DEFAULT 0,
+      malpractice_count INTEGER NOT NULL DEFAULT 0,
+      malpractice_flag INTEGER NOT NULL DEFAULT 0
+    )`
+  ).run();
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS test_attempt_answers (
+      answer_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      attempt_id INTEGER NOT NULL,
+      question_id INTEGER NOT NULL,
+      answer_text TEXT,
+      is_correct INTEGER NOT NULL DEFAULT 0,
+      points_awarded REAL NOT NULL DEFAULT 0
+    )`
+  ).run();
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS test_malpractice_events (
+      event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      attempt_id INTEGER NOT NULL,
+      event_type TEXT NOT NULL,
+      details TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`
+  ).run();
+}
+
+async function testsCreate(request, session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  await ensureTestsTables(env);
+  const body = await request.json();
+  const title = String(body.title || "").trim();
+  const description = String(body.description || "").trim();
+  const durationMinutes = Math.max(5, Number(body.duration_minutes || 30));
+  const questions = Array.isArray(body.questions) ? body.questions : [];
+  const assignedStudents = Array.isArray(body.assigned_students) ? body.assigned_students : [];
+  if (!title || !questions.length) throw httpError(400, "Invalid payload");
+  const testRes = await env.DB.prepare(
+    "INSERT INTO tests (title, description, duration_minutes, created_by) VALUES (?, ?, ?, ?)"
+  ).bind(title, description, durationMinutes, session.user_id).run();
+  const testId = Number(testRes.meta?.last_row_id || 0);
+  let order = 1;
+  for (const q of questions) {
+    const qText = String(q.question_text || "").trim();
+    const a = String(q.option_a || "").trim();
+    const b = String(q.option_b || "").trim();
+    const c = String(q.option_c || "").trim();
+    const d = String(q.option_d || "").trim();
+    const correct = String(q.correct_answer || "").trim().toUpperCase();
+    if (!qText || !a || !b || !c || !d || !["A", "B", "C", "D"].includes(correct)) continue;
+    await env.DB.prepare(
+      `INSERT INTO test_questions
+       (test_id, question_order, question_text, option_a, option_b, option_c, option_d, correct_answer, points)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(testId, order++, qText, a, b, c, d, correct, 1).run();
+  }
+  const finalIds = new Set();
+  for (const s of assignedStudents) {
+    const sid = String(s || "").trim();
+    if (sid) finalIds.add(sid);
+  }
+  for (const sid of finalIds) {
+    await env.DB.prepare("INSERT OR IGNORE INTO test_assignments (test_id, student_id) VALUES (?, ?)")
+      .bind(testId, sid).run();
+  }
+  await writeActivity(
+    env,
+    session,
+    "test_created",
+    `Created test #${testId} (${title})`,
+    { test_id: testId, title, question_count: order - 1, assigned_count: finalIds.size }
+  );
+  return json({ status: "ok", test_id: testId });
+}
+
+async function testsList(session, env) {
+  await ensureTestsTables(env);
+  if (isSuperuser(session)) {
+    const rows = await env.DB.prepare(
+      `SELECT
+        t.test_id,
+        t.title,
+        t.duration_minutes,
+        t.created_at,
+        (SELECT COUNT(*) FROM test_questions q WHERE q.test_id = t.test_id) AS question_count,
+        (SELECT COUNT(*) FROM test_assignments a WHERE a.test_id = t.test_id) AS assignment_count,
+        (SELECT COUNT(*) FROM test_attempts x WHERE x.test_id = t.test_id) AS attempt_count,
+        (SELECT COUNT(*) FROM test_attempts x WHERE x.test_id = t.test_id AND x.malpractice_flag = 1) AS malpractice_count
+       FROM tests t
+       WHERE t.is_active = 1
+       ORDER BY t.test_id DESC`
+    ).all();
+    return json(rows.results || []);
+  }
+  const rows = await env.DB.prepare(
+    `SELECT
+      t.test_id,
+      t.title,
+      t.duration_minutes,
+      (
+        SELECT status FROM test_attempts x
+        WHERE x.test_id = t.test_id AND x.student_id = ?
+        ORDER BY x.attempt_id DESC LIMIT 1
+      ) AS attempt_status
+     FROM tests t
+     WHERE t.is_active = 1
+       AND (
+         NOT EXISTS (SELECT 1 FROM test_assignments a WHERE a.test_id = t.test_id)
+         OR EXISTS (SELECT 1 FROM test_assignments a WHERE a.test_id = t.test_id AND a.student_id = ?)
+       )
+     ORDER BY t.test_id DESC`
+  ).bind(session.user_id, session.user_id).all();
+  return json(rows.results || []);
+}
+
+async function testDetail(testId, session, env) {
+  await ensureTestsTables(env);
+  const test = await env.DB.prepare(
+    "SELECT test_id, title, description, duration_minutes FROM tests WHERE test_id = ? AND is_active = 1"
+  ).bind(testId).first();
+  if (!test) throw httpError(404, "Test not found");
+  if (!isSuperuser(session)) {
+    const assigned = await env.DB.prepare(
+      `SELECT 1 AS ok WHERE
+         NOT EXISTS (SELECT 1 FROM test_assignments a WHERE a.test_id = ?)
+         OR EXISTS (SELECT 1 FROM test_assignments a WHERE a.test_id = ? AND a.student_id = ?)`
+    ).bind(testId, testId, session.user_id).first();
+    if (!assigned) throw httpError(403, "Forbidden");
+  }
+  const qRows = await env.DB.prepare(
+    `SELECT question_id, question_order, question_text, option_a, option_b, option_c, option_d, correct_answer
+     FROM test_questions WHERE test_id = ? ORDER BY question_order ASC`
+  ).bind(testId).all();
+  const questions = (qRows.results || []).map((q) => ({
+    question_id: q.question_id,
+    question_order: q.question_order,
+    question_text: q.question_text,
+    option_a: q.option_a,
+    option_b: q.option_b,
+    option_c: q.option_c,
+    option_d: q.option_d,
+    correct_answer: isSuperuser(session) ? q.correct_answer : undefined,
+  }));
+  return json({ ...test, questions });
+}
+
+async function testStart(testId, session, env) {
+  if (isSuperuser(session)) throw httpError(403, "Staff cannot take tests");
+  await ensureTestsTables(env);
+  const test = await env.DB.prepare(
+    "SELECT test_id, duration_minutes FROM tests WHERE test_id = ? AND is_active = 1"
+  ).bind(testId).first();
+  if (!test) throw httpError(404, "Test not found");
+  const assigned = await env.DB.prepare(
+    `SELECT 1 AS ok WHERE
+       NOT EXISTS (SELECT 1 FROM test_assignments a WHERE a.test_id = ?)
+       OR EXISTS (SELECT 1 FROM test_assignments a WHERE a.test_id = ? AND a.student_id = ?)`
+  ).bind(testId, testId, session.user_id).first();
+  if (!assigned) throw httpError(403, "Forbidden");
+  let attempt = await env.DB.prepare(
+    `SELECT attempt_id, start_time, status
+     FROM test_attempts WHERE test_id = ? AND student_id = ? AND status = 'in_progress'
+     ORDER BY attempt_id DESC LIMIT 1`
+  ).bind(testId, session.user_id).first();
+  if (!attempt) {
+    const ins = await env.DB.prepare(
+      "INSERT INTO test_attempts (test_id, student_id, status) VALUES (?, ?, 'in_progress')"
+    ).bind(testId, session.user_id).run();
+    attempt = await env.DB.prepare(
+      "SELECT attempt_id, start_time, status FROM test_attempts WHERE attempt_id = ?"
+    ).bind(Number(ins.meta?.last_row_id || 0)).first();
+    await writeActivity(
+      env,
+      session,
+      "test_started",
+      `Test attempt started (test #${testId})`,
+      { test_id: testId, attempt_id: attempt?.attempt_id || 0, student_id: session.user_id }
+    );
+  }
+  const ansRows = await env.DB.prepare(
+    "SELECT question_id, answer_text FROM test_attempt_answers WHERE attempt_id = ?"
+  ).bind(attempt.attempt_id).all();
+  const answers = {};
+  (ansRows.results || []).forEach((r) => {
+    answers[r.question_id] = r.answer_text || "";
+  });
+  const startEpoch = Math.floor(new Date(`${String(attempt.start_time).replace(" ", "T")}Z`).getTime() / 1000);
+  const endsAtEpoch = startEpoch + Number(test.duration_minutes || 30) * 60;
+  return json({
+    attempt_id: attempt.attempt_id,
+    test_id: testId,
+    status: attempt.status,
+    ends_at_epoch: endsAtEpoch,
+    answers,
+  });
+}
+
+async function testSubmit(attemptId, request, session, env) {
+  if (isSuperuser(session)) throw httpError(403, "Staff cannot submit tests");
+  await ensureTestsTables(env);
+  const attempt = await env.DB.prepare(
+    "SELECT attempt_id, test_id, student_id, status FROM test_attempts WHERE attempt_id = ?"
+  ).bind(attemptId).first();
+  if (!attempt) throw httpError(404, "Attempt not found");
+  if (attempt.student_id !== session.user_id) throw httpError(403, "Forbidden");
+  if (attempt.status === "submitted") throw httpError(400, "Already submitted");
+  const body = await request.json();
+  const answers = Array.isArray(body.answers) ? body.answers : [];
+  await env.DB.prepare("DELETE FROM test_attempt_answers WHERE attempt_id = ?").bind(attemptId).run();
+  const qRows = await env.DB.prepare(
+    "SELECT question_id, correct_answer, points FROM test_questions WHERE test_id = ?"
+  ).bind(attempt.test_id).all();
+  const byId = new Map();
+  (qRows.results || []).forEach((q) => byId.set(Number(q.question_id), q));
+  let score = 0;
+  let total = 0;
+  for (const q of byId.values()) total += Number(q.points || 1);
+  for (const item of answers) {
+    const qid = Number(item.question_id || 0);
+    if (!byId.has(qid)) continue;
+    const q = byId.get(qid);
+    const given = String(item.answer || "").trim().toUpperCase();
+    const correct = String(q.correct_answer || "").trim().toUpperCase();
+    const ok = given && given === correct;
+    const points = ok ? Number(q.points || 1) : 0;
+    score += points;
+    await env.DB.prepare(
+      "INSERT INTO test_attempt_answers (attempt_id, question_id, answer_text, is_correct, points_awarded) VALUES (?, ?, ?, ?, ?)"
+    ).bind(attemptId, qid, given, ok ? 1 : 0, points).run();
+  }
+  await env.DB.prepare(
+    "UPDATE test_attempts SET status = 'submitted', submitted_at = datetime('now'), score = ?, total_points = ? WHERE attempt_id = ?"
+  ).bind(score, total, attemptId).run();
+  await writeActivity(
+    env,
+    session,
+    "test_submitted",
+    `Test attempt submitted (attempt #${attemptId})`,
+    { attempt_id: attemptId, test_id: attempt.test_id, score, total_points: total, student_id: session.user_id }
+  );
+  return json({ status: "ok", score, total_points: total });
+}
+
+async function testMalpractice(attemptId, request, session, env) {
+  if (isSuperuser(session)) throw httpError(403, "Forbidden");
+  await ensureTestsTables(env);
+  const attempt = await env.DB.prepare(
+    "SELECT attempt_id, student_id, malpractice_count FROM test_attempts WHERE attempt_id = ?"
+  ).bind(attemptId).first();
+  if (!attempt) throw httpError(404, "Attempt not found");
+  if (attempt.student_id !== session.user_id) throw httpError(403, "Forbidden");
+  const body = await request.json();
+  const eventType = String(body.event_type || "").trim() || "unknown";
+  const details = String(body.details || "").trim();
+  await env.DB.prepare(
+    "INSERT INTO test_malpractice_events (attempt_id, event_type, details) VALUES (?, ?, ?)"
+  ).bind(attemptId, eventType, details).run();
+  const newCount = Number(attempt.malpractice_count || 0) + 1;
+  await env.DB.prepare(
+    "UPDATE test_attempts SET malpractice_count = ?, malpractice_flag = 1 WHERE attempt_id = ?"
+  ).bind(newCount, attemptId).run();
+  await writeActivity(
+    env,
+    session,
+    "test_malpractice",
+    `Malpractice flagged on attempt #${attemptId}`,
+    { attempt_id: attemptId, event_type: eventType, details, student_id: session.user_id, count: newCount }
+  );
+  return json({ status: "ok", malpractice_count: newCount, flagged: true });
 }
 
 async function listStudents(session, env) {
@@ -448,6 +961,104 @@ async function addStudent(url, session, env) {
   return json({ status: "ok", message: "Student added", student_id: sid });
 }
 
+function normalizeStudentIds(rawIds) {
+  if (!Array.isArray(rawIds)) return [];
+  const unique = new Set();
+  for (const value of rawIds) {
+    const sid = String(value || "").trim();
+    if (sid) unique.add(sid);
+  }
+  return Array.from(unique);
+}
+
+async function studentsBulkBatch(request, session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  const body = await request.json();
+  const studentIds = normalizeStudentIds(body.student_ids);
+  const batch = String(body.batch || "").trim();
+  if (!studentIds.length || !batch) throw httpError(400, "Invalid payload");
+  const previousBatches = {};
+  for (const sid of studentIds) {
+    const existing = await env.DB.prepare("SELECT batch FROM students WHERE student_id = ?")
+      .bind(sid).first();
+    if (existing && existing.batch) {
+      previousBatches[sid] = String(existing.batch);
+    }
+    await env.DB.prepare("UPDATE students SET batch = ? WHERE student_id = ?")
+      .bind(batch, sid).run();
+    await env.DB.prepare("UPDATE attendance SET batch = ? WHERE student_id = ?")
+      .bind(batch, sid).run();
+  }
+  await writeActivity(
+    env,
+    session,
+    "students_batch_updated",
+    `Moved ${studentIds.length} student(s) to batch ${batch}`,
+    { student_ids: studentIds, batch, previous_batches: previousBatches }
+  );
+  return json({ status: "ok", updated: studentIds.length });
+}
+
+async function studentsMarkAlumni(request, session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  const body = await request.json();
+  const studentIds = normalizeStudentIds(body.student_ids);
+  if (!studentIds.length) throw httpError(400, "Invalid payload");
+  const previousStatus = {};
+  for (const sid of studentIds) {
+    const existing = await env.DB.prepare("SELECT status FROM students WHERE student_id = ?")
+      .bind(sid).first();
+    previousStatus[sid] = String(existing?.status || "Active");
+    await env.DB.prepare("UPDATE students SET status = 'Alumni' WHERE student_id = ?")
+      .bind(sid).run();
+  }
+  await writeActivity(
+    env,
+    session,
+    "students_marked_alumni",
+    `Marked ${studentIds.length} student(s) as alumni`,
+    { student_ids: studentIds, previous_status: previousStatus }
+  );
+  return json({ status: "ok", updated: studentIds.length });
+}
+
+async function studentsDelete(request, session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  const body = await request.json();
+  const studentIds = normalizeStudentIds(body.student_ids);
+  if (!studentIds.length) throw httpError(400, "Invalid payload");
+  const deletedSnapshots = [];
+  for (const sid of studentIds) {
+    const student = await env.DB.prepare(
+      "SELECT student_id, student_name, course, batch, status FROM students WHERE student_id = ?"
+    ).bind(sid).first();
+    if (!student) continue;
+    const attendanceRows = await env.DB.prepare(
+      "SELECT student_name, course, batch, date, attendance_status, remarks, created_at FROM attendance WHERE student_id = ?"
+    ).bind(sid).all();
+    const feeRows = await env.DB.prepare(
+      "SELECT amount_total, amount_paid, due_date, remarks, receipt_path, created_at FROM fees WHERE student_id = ?"
+    ).bind(sid).all();
+    deletedSnapshots.push({
+      student,
+      attendance: attendanceRows.results || [],
+      fees: feeRows.results || [],
+    });
+    await env.DB.prepare("DELETE FROM attendance WHERE student_id = ?").bind(sid).run();
+    await env.DB.prepare("DELETE FROM fees WHERE student_id = ?").bind(sid).run();
+    await env.DB.prepare("DELETE FROM students WHERE student_id = ?").bind(sid).run();
+    await env.DB.prepare("DELETE FROM credentials WHERE username = ?").bind(sid).run();
+  }
+  await writeActivity(
+    env,
+    session,
+    "students_deleted",
+    `Deleted ${deletedSnapshots.length} student(s)`,
+    { students: deletedSnapshots }
+  );
+  return json({ status: "ok", deleted: deletedSnapshots.length });
+}
+
 async function studentBalance(studentId, session, env) {
   ensureSelfOrSuperuser(session, studentId);
   const info = await studentFinancials(env, studentId);
@@ -474,9 +1085,64 @@ async function studentAttendance(studentId, session, env) {
 async function studentFees(studentId, session, env) {
   ensureSelfOrSuperuser(session, studentId);
   const rows = await env.DB.prepare(
-    "SELECT fee_id, amount_total, amount_paid, due_date, remarks FROM fees WHERE student_id = ? ORDER BY fee_id DESC"
+    "SELECT fee_id, amount_total, amount_paid, due_date, remarks, created_at FROM fees WHERE student_id = ? ORDER BY fee_id DESC"
   ).bind(studentId).all();
   return json(rows.results || []);
+}
+
+function parseRazorpayRemarks(remarks) {
+  const text = String(remarks || "");
+  const paymentMatch = text.match(/payment_id=([A-Za-z0-9_]+)/i);
+  const orderMatch = text.match(/order_id=([A-Za-z0-9_]+)/i);
+  return {
+    payment_id: paymentMatch ? paymentMatch[1] : "",
+    order_id: orderMatch ? orderMatch[1] : "",
+  };
+}
+
+function toIsoDate(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return new Date().toISOString().slice(0, 10);
+  const normalized = raw.includes("T") ? raw : raw.replace(" ", "T");
+  const d = new Date(`${normalized}${normalized.endsWith("Z") ? "" : "Z"}`);
+  if (Number.isNaN(d.getTime())) return new Date().toISOString().slice(0, 10);
+  return d.toISOString().slice(0, 10);
+}
+
+async function feeInvoice(feeId, session, env) {
+  const row = await env.DB.prepare(
+    `SELECT
+      f.fee_id,
+      f.student_id,
+      f.amount_total,
+      f.amount_paid,
+      f.remarks,
+      f.created_at,
+      s.student_name,
+      s.course
+    FROM fees f
+    LEFT JOIN students s ON s.student_id = f.student_id
+    WHERE f.fee_id = ?`
+  ).bind(feeId).first();
+  if (!row) throw httpError(404, "Fee entry not found");
+  ensureSelfOrSuperuser(session, String(row.student_id || ""));
+  const refs = parseRazorpayRemarks(row.remarks);
+  const financials = await studentFinancials(env, String(row.student_id || ""));
+  const defaultDue = Math.max(Number(row.amount_total || 0) - Number(row.amount_paid || 0), 0);
+  return json({
+    invoice: {
+      invoice_no: `AAI-INV-${Number(row.fee_id || feeId)}`,
+      date: toIsoDate(row.created_at),
+      student_id: row.student_id || "",
+      student_name: row.student_name || "",
+      course: row.course || "",
+      payment_id: refs.payment_id,
+      order_id: refs.order_id,
+      amount_paid: Number(row.amount_paid || 0),
+      amount_total: Number(row.amount_total || 0),
+      balance_due: financials ? Number(financials.due || 0) : defaultDue,
+    },
+  });
 }
 
 async function attendanceRecent(session, env) {
@@ -913,6 +1579,10 @@ async function activityLogs(session, env) {
       undone_at: r.undone_at,
       undoable: !r.undone && [
         "student_added",
+        "students_batch_updated",
+        "students_marked_alumni",
+        "students_deleted",
+        "admission_deleted",
         "attendance_recorded",
         "fee_recorded",
         "timetable_created",
@@ -945,6 +1615,82 @@ async function activityUndo(request, session, env) {
     const sid = String(payload.student_id || "");
     if (!sid) throw httpError(400, "Undo payload missing student_id");
     await env.DB.prepare("DELETE FROM students WHERE student_id = ?").bind(sid).run();
+    await env.DB.prepare("DELETE FROM credentials WHERE username = ?").bind(sid).run();
+  } else if (row.action_type === "students_batch_updated") {
+    const ids = Array.isArray(payload.student_ids) ? payload.student_ids : [];
+    const previous = payload.previous_batches && typeof payload.previous_batches === "object"
+      ? payload.previous_batches
+      : {};
+    if (!ids.length) throw httpError(400, "Undo payload missing student_ids");
+    for (const sid of ids) {
+      const prev = String(previous[String(sid)] || "").trim();
+      if (!prev) continue;
+      await env.DB.prepare("UPDATE students SET batch = ? WHERE student_id = ?")
+        .bind(prev, String(sid)).run();
+      await env.DB.prepare("UPDATE attendance SET batch = ? WHERE student_id = ?")
+        .bind(prev, String(sid)).run();
+    }
+  } else if (row.action_type === "students_marked_alumni") {
+    const ids = Array.isArray(payload.student_ids) ? payload.student_ids : [];
+    const previous = payload.previous_status && typeof payload.previous_status === "object"
+      ? payload.previous_status
+      : {};
+    if (!ids.length) throw httpError(400, "Undo payload missing student_ids");
+    for (const sid of ids) {
+      const status = String(previous[String(sid)] || "Active").trim() || "Active";
+      await env.DB.prepare("UPDATE students SET status = ? WHERE student_id = ?")
+        .bind(status, String(sid)).run();
+    }
+  } else if (row.action_type === "students_deleted") {
+    const snapshots = Array.isArray(payload.students) ? payload.students : [];
+    if (!snapshots.length) throw httpError(400, "Undo payload missing students");
+    for (const snap of snapshots) {
+      const student = snap && snap.student ? snap.student : null;
+      if (!student || !student.student_id) continue;
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO students (student_id, student_name, course, batch, status)
+         VALUES (?, ?, ?, ?, ?)`
+      ).bind(
+        String(student.student_id || ""),
+        String(student.student_name || ""),
+        String(student.course || ""),
+        String(student.batch || ""),
+        String(student.status || "Active")
+      ).run();
+      const attendanceRows = Array.isArray(snap.attendance) ? snap.attendance : [];
+      for (const rowAttendance of attendanceRows) {
+        await env.DB.prepare(
+          `INSERT OR IGNORE INTO attendance
+           (student_id, student_name, course, batch, date, attendance_status, remarks, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          String(student.student_id || ""),
+          String(rowAttendance.student_name || student.student_name || ""),
+          String(rowAttendance.course || student.course || ""),
+          String(rowAttendance.batch || student.batch || ""),
+          String(rowAttendance.date || ""),
+          String(rowAttendance.attendance_status || "A"),
+          String(rowAttendance.remarks || ""),
+          String(rowAttendance.created_at || "")
+        ).run();
+      }
+      const feeRows = Array.isArray(snap.fees) ? snap.fees : [];
+      for (const rowFee of feeRows) {
+        await env.DB.prepare(
+          `INSERT INTO fees (student_id, amount_total, amount_paid, due_date, remarks, receipt_path, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          String(student.student_id || ""),
+          Number(rowFee.amount_total || 0),
+          Number(rowFee.amount_paid || 0),
+          String(rowFee.due_date || ""),
+          String(rowFee.remarks || ""),
+          String(rowFee.receipt_path || ""),
+          String(rowFee.created_at || "")
+        ).run();
+      }
+    }
+    await ensureCredentials(env);
   } else if (row.action_type === "attendance_recorded") {
     const date = String(payload.date || "");
     const ids = Array.isArray(payload.student_ids) ? payload.student_ids : [];
@@ -977,6 +1723,47 @@ async function activityUndo(request, session, env) {
     if (!admissionId) throw httpError(400, "Undo payload missing admission_id");
     await ensureAdmissionsTable(env);
     await env.DB.prepare("DELETE FROM admissions WHERE admission_id = ?").bind(admissionId).run();
+  } else if (row.action_type === "admission_deleted") {
+    const admission = payload && typeof payload.admission === "object" ? payload.admission : null;
+    if (!admission || !admission.admission_id) throw httpError(400, "Undo payload missing admission");
+    await ensureAdmissionsTable(env);
+    await env.DB.prepare(
+      `INSERT OR REPLACE INTO admissions (
+        admission_id, full_name, first_name, middle_name, last_name, phone, email, blood_group, age, dob,
+        aadhaar_number, nationality, father_name, father_phone, father_occupation, father_email,
+        mother_name, mother_phone, mother_occupation, mother_email, correspondence_address,
+        permanent_address, course, academic_details_json, admission_pdf_r2_key, admission_pdf_bytes, status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      Number(admission.admission_id || 0),
+      String(admission.full_name || ""),
+      String(admission.first_name || ""),
+      String(admission.middle_name || ""),
+      String(admission.last_name || ""),
+      String(admission.phone || ""),
+      String(admission.email || ""),
+      String(admission.blood_group || ""),
+      Number(admission.age || 0),
+      String(admission.dob || ""),
+      String(admission.aadhaar_number || ""),
+      String(admission.nationality || ""),
+      String(admission.father_name || ""),
+      String(admission.father_phone || ""),
+      String(admission.father_occupation || ""),
+      String(admission.father_email || ""),
+      String(admission.mother_name || ""),
+      String(admission.mother_phone || ""),
+      String(admission.mother_occupation || ""),
+      String(admission.mother_email || ""),
+      String(admission.correspondence_address || ""),
+      String(admission.permanent_address || ""),
+      String(admission.course || ""),
+      String(admission.academic_details_json || "[]"),
+      String(admission.admission_pdf_r2_key || ""),
+      Number(admission.admission_pdf_bytes || 0),
+      String(admission.status || "new"),
+      String(admission.created_at || "")
+    ).run();
   } else {
     throw httpError(400, "This action is not undoable");
   }

@@ -3,6 +3,11 @@ const API = LOCAL_FASTAPI_HOSTS.includes(window.location.host)
   ? window.location.origin
   : `${window.location.origin}/api`;
 const TOKEN_KEY = "authToken";
+const NATO_BATCHES = [
+  "Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliett",
+  "Kilo", "Lima", "Mike", "November", "Oscar", "Papa", "Quebec", "Romeo", "Sierra", "Tango",
+  "Uniform", "Victor", "Whiskey", "X-ray", "Yankee", "Zulu",
+];
 
 let allStudents = [];
 let selectedId = null;
@@ -11,13 +16,51 @@ let studentFeeSummary = null;
 let razorpayKeyId = null;
 let portalMode = "student";
 let alumniSelectedIds = new Set();
+let selectedStudentIds = new Set();
 let announcementPollTimer = null;
 let latestAnnouncementIdSeen = Number(localStorage.getItem("latestAnnouncementIdSeen") || 0);
 let announcementsNotifierBootstrapped = false;
+let currentAttempt = null;
+let currentAttemptQuestions = [];
+let currentAttemptTimer = null;
+
+function buildBatchOptions() {
+  const options = [];
+  NATO_BATCHES.forEach((name) => options.push(name));
+  for (let cycle = 2; cycle <= 5; cycle += 1) {
+    NATO_BATCHES.forEach((name) => options.push(`${name}-${cycle}`));
+  }
+  return options;
+}
+
+function populateBatchInputs() {
+  const batchOptions = buildBatchOptions();
+  const datalist = document.getElementById("natoBatchList");
+  if (datalist) {
+    datalist.innerHTML = "";
+    batchOptions.forEach((value) => {
+      const option = document.createElement("option");
+      option.value = value;
+      datalist.appendChild(option);
+    });
+  }
+  const bulkSelect = document.getElementById("bulkBatchSelect");
+  if (bulkSelect) {
+    bulkSelect.innerHTML = `<option value="">Move selected to batch...</option>`;
+    batchOptions.forEach((value) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = value;
+      bulkSelect.appendChild(option);
+    });
+  }
+}
 
 async function loadStudents() {
   const res = await authFetch(`${API}/students`);
   allStudents = await res.json();
+  const validIds = new Set(allStudents.map((s) => String(s.student_id)));
+  selectedStudentIds = new Set(Array.from(selectedStudentIds).filter((id) => validIds.has(id)));
   renderStudentList();
   updateSideCounts();
 }
@@ -30,7 +73,7 @@ function renderStudentList() {
   const search = document.getElementById("search").value.trim().toLowerCase();
   list.innerHTML = "";
 
-  const filtered = allStudents.filter(s => {
+  const filtered = allStudents.filter((s) => {
     const key = `${s.student_name} ${s.student_id}`.toLowerCase();
     return key.includes(search);
   }).sort((a, b) => {
@@ -47,22 +90,53 @@ function renderStudentList() {
     li.className = "student-item";
     li.innerHTML = `<div><strong>No students found</strong></div>`;
     list.appendChild(li);
+    updateSelectedCount();
     return;
   }
 
-  filtered.forEach(s => {
+  filtered.forEach((s) => {
     const li = document.createElement("li");
     li.className = "student-item";
     if (String(s.student_id) === String(selectedId)) {
       li.classList.add("active");
     }
+    const isChecked = selectedStudentIds.has(String(s.student_id));
     li.innerHTML = `
-      <div><strong>${s.student_name}</strong></div>
-      <div class="student-meta">ID: ${s.student_id} • ${s.course} • ${s.batch}</div>
+      <div class="student-row-top">
+        <input type="checkbox" class="student-select" data-id="${s.student_id}" ${isChecked ? "checked" : ""} />
+        <div><strong>${s.student_name}</strong></div>
+      </div>
+      <div class="student-meta">ID: ${s.student_id} | ${s.course} | ${s.batch} | ${s.status || "Active"}</div>
+      <div class="student-actions">
+        <button class="btn" data-action="alumni" data-id="${s.student_id}">Mark Alumni</button>
+        <button class="btn" data-action="delete" data-id="${s.student_id}">Delete</button>
+      </div>
     `;
     li.addEventListener("click", () => selectStudent(s));
+    li.querySelector(".student-select")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const sid = String(e.target.dataset.id || "");
+      if (!sid) return;
+      if (e.target.checked) selectedStudentIds.add(sid);
+      else selectedStudentIds.delete(sid);
+      updateSelectedCount();
+    });
+    li.querySelector('[data-action="alumni"]')?.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await markSingleAlumni(String(e.target.dataset.id || ""));
+    });
+    li.querySelector('[data-action="delete"]')?.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await deleteSingleStudent(String(e.target.dataset.id || ""));
+    });
     list.appendChild(li);
   });
+  updateSelectedCount();
+}
+
+function updateSelectedCount() {
+  const el = document.getElementById("selectedStudentCount");
+  if (el) el.textContent = String(selectedStudentIds.size);
 }
 
 async function addStudent() {
@@ -85,12 +159,121 @@ async function addStudent() {
   loadStudents();
 }
 
+function getSelectedStudentIds() {
+  return Array.from(selectedStudentIds);
+}
+
+async function bulkMoveBatch() {
+  const ids = getSelectedStudentIds();
+  const batch = (document.getElementById("bulkBatchSelect")?.value || "").trim();
+  if (!ids.length) {
+    alert("Select at least one student.");
+    return;
+  }
+  if (!batch) {
+    alert("Select a target batch.");
+    return;
+  }
+  const res = await authFetch(`${API}/students/bulk-batch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ student_ids: ids, batch }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "Failed to move batch.");
+    return;
+  }
+  selectedStudentIds.clear();
+  updateSelectedCount();
+  await loadStudents();
+  alert("Batch updated.");
+}
+
+async function bulkMarkAlumni() {
+  const ids = getSelectedStudentIds();
+  if (!ids.length) {
+    alert("Select at least one student.");
+    return;
+  }
+  const res = await authFetch(`${API}/students/mark-alumni`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ student_ids: ids }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "Failed to mark alumni.");
+    return;
+  }
+  selectedStudentIds.clear();
+  updateSelectedCount();
+  await Promise.all([loadStudents(), loadProudAlumni()]);
+  alert("Marked as alumni.");
+}
+
+async function bulkDeleteStudents() {
+  const ids = getSelectedStudentIds();
+  if (!ids.length) {
+    alert("Select at least one student.");
+    return;
+  }
+  if (!confirm(`Delete ${ids.length} selected student(s)?`)) return;
+  const res = await authFetch(`${API}/students/delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ student_ids: ids }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "Failed to delete students.");
+    return;
+  }
+  selectedStudentIds.clear();
+  updateSelectedCount();
+  await Promise.all([loadStudents(), loadProudAlumni()]);
+  alert("Deleted.");
+}
+
+async function markSingleAlumni(studentId) {
+  if (!studentId) return;
+  const res = await authFetch(`${API}/students/mark-alumni`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ student_ids: [studentId] }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "Failed to mark alumni.");
+    return;
+  }
+  selectedStudentIds.delete(studentId);
+  await Promise.all([loadStudents(), loadProudAlumni()]);
+}
+
+async function deleteSingleStudent(studentId) {
+  if (!studentId) return;
+  if (!confirm("Delete this student?")) return;
+  const res = await authFetch(`${API}/students/delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ student_ids: [studentId] }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "Failed to delete student.");
+    return;
+  }
+  selectedStudentIds.delete(studentId);
+  await Promise.all([loadStudents(), loadProudAlumni()]);
+}
+
 async function selectStudent(student) {
   selectedId = student.student_id;
   renderStudentList();
 
   document.getElementById("detailName").textContent = student.student_name;
-  document.getElementById("detailMeta").textContent = `ID: ${student.student_id} • ${student.course} • ${student.batch}`;
+  document.getElementById("detailMeta").textContent = `ID: ${student.student_id} | ${student.course} | ${student.batch}`;
 
   await Promise.all([
     loadBalance(student.student_id),
@@ -140,7 +323,7 @@ async function loadFees(studentId) {
   body.innerHTML = "";
 
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="5" class="empty">No fee entries</td></tr>`;
+    body.innerHTML = `<tr><td colspan="6" class="empty">No fee entries</td></tr>`;
     return;
   }
 
@@ -152,9 +335,30 @@ async function loadFees(studentId) {
       <td>${formatMoney(r.amount_paid)}</td>
       <td>${r.due_date || "-"}</td>
       <td>${r.remarks || ""}</td>
+      <td><button class="btn" onclick="openFeeInvoicePdf(${Number(r.fee_id)})">Invoice PDF</button></td>
     `;
     body.appendChild(tr);
   });
+}
+
+async function openFeeInvoicePdf(feeId) {
+  const id = Number(feeId || 0);
+  if (!id) {
+    alert("Invalid fee entry.");
+    return;
+  }
+  const res = await authFetch(`${API}/fees/${id}/invoice`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "Unable to load invoice.");
+    return;
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!data.invoice) {
+    alert("Invoice data not found.");
+    return;
+  }
+  await downloadInvoicePdf(data.invoice);
 }
 
 function updateSideCounts() {
@@ -184,6 +388,7 @@ function setupTabs() {
 }
 
 document.getElementById("search")?.addEventListener("input", renderStudentList);
+populateBatchInputs();
 setupTabs();
 setupSidebarNav();
 loadProudAlumni();
@@ -238,6 +443,9 @@ async function openPortal(mode) {
 }
 
 function showHome() {
+  endAttemptProtection();
+  currentAttempt = null;
+  currentAttemptQuestions = [];
   localStorage.removeItem(TOKEN_KEY);
   document.getElementById("homeRoot")?.classList.remove("hidden");
   document.getElementById("loginRoot")?.classList.add("hidden");
@@ -407,6 +615,7 @@ async function submitAdmissionForm() {
 
 async function generateAdmissionPdfAttachment(payload) {
   if (!window.PDFLib) return null;
+  const MAX_PDF_BYTES = 1024 * 1024;
   const { PDFDocument, StandardFonts, rgb } = window.PDFLib;
   const doc = await PDFDocument.create();
   const page = doc.addPage([595, 842]);
@@ -450,6 +659,9 @@ async function generateAdmissionPdfAttachment(payload) {
   }
 
   const bytes = await doc.save();
+  if (bytes.length > MAX_PDF_BYTES) {
+    throw new Error("Admission PDF must be less than 1 MB. Please reduce academic rows and retry.");
+  }
   let binary = "";
   const chunk = 0x8000;
   for (let i = 0; i < bytes.length; i += chunk) {
@@ -484,6 +696,12 @@ function setupSidebarNav() {
 }
 
 function switchSection(target) {
+  if (authInfo && authInfo.role === "student") {
+    const blocked = new Set(["students", "reports", "activity", "admissions"]);
+    if (blocked.has(target)) {
+      target = "attendance";
+    }
+  }
   document.querySelectorAll(".nav-item").forEach(b => b.classList.remove("active"));
   const activeBtn = document.querySelector(`.nav-item[data-section="${target}"]`);
   if (activeBtn) {
@@ -504,6 +722,9 @@ function switchSection(target) {
     renderFeesEntryList();
     loadFeeSummary();
   }
+  if (target === "tests") {
+    loadTests();
+  }
   if (target === "feed") {
     loadFeed();
   }
@@ -518,6 +739,9 @@ function switchSection(target) {
   }
   if (target === "notifications") {
     loadNotifications();
+  }
+  if (target === "admissions") {
+    loadAdmissions();
   }
   if (target === "alumni") {
     loadProudAlumni();
@@ -944,6 +1168,374 @@ async function loadNotifications() {
   });
 }
 
+async function loadAdmissions() {
+  const body = document.getElementById("admissionsBody");
+  if (!body) return;
+  const res = await authFetch(`${API}/admissions`);
+  if (!res.ok) {
+    body.innerHTML = `<tr><td colspan="8" class="empty">Failed to load admissions</td></tr>`;
+    return;
+  }
+  const rows = await res.json();
+  body.innerHTML = "";
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="8" class="empty">No admissions found</td></tr>`;
+    return;
+  }
+  rows.forEach((r) => {
+    const tr = document.createElement("tr");
+    const hasPdf = Boolean(r.pdf_available);
+    tr.innerHTML = `
+      <td>${r.admission_id || "-"}</td>
+      <td>${r.full_name || "-"}</td>
+      <td>${r.course || "-"}</td>
+      <td>${r.phone || "-"}</td>
+      <td>${r.email || "-"}</td>
+      <td>${formatDateTime(r.created_at || "")}</td>
+      <td>${hasPdf ? `<button class="btn" data-id="${r.admission_id}">View PDF</button>` : "-"}</td>
+      <td><button class="btn" data-delete-id="${r.admission_id}">Delete</button></td>
+    `;
+    const btn = tr.querySelector("button[data-id]");
+    if (btn) {
+      btn.addEventListener("click", async () => {
+        await openAdmissionPdf(Number(r.admission_id));
+      });
+    }
+    const deleteBtn = tr.querySelector("button[data-delete-id]");
+    if (deleteBtn) {
+      deleteBtn.addEventListener("click", async () => {
+        await deleteAdmission(Number(r.admission_id), r.full_name || "");
+      });
+    }
+    body.appendChild(tr);
+  });
+}
+
+async function openAdmissionPdf(admissionId) {
+  if (!admissionId) return;
+  const res = await authFetch(`${API}/admissions/${admissionId}/pdf`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "Unable to open admission PDF.");
+    return;
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  window.open(url, "_blank", "noopener,noreferrer");
+  setTimeout(() => URL.revokeObjectURL(url), 120000);
+}
+
+async function deleteAdmission(admissionId, fullName) {
+  if (!admissionId) return;
+  if (!confirm(`Delete admission #${admissionId}${fullName ? ` (${fullName})` : ""}?`)) return;
+  const res = await authFetch(`${API}/admissions/${admissionId}`, { method: "DELETE" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "Unable to delete admission.");
+    return;
+  }
+  await Promise.all([loadAdmissions(), loadActivityLogs()]);
+}
+
+function addTestQuestionRow(data = {}) {
+  const container = document.getElementById("testQuestionRows");
+  if (!container) return;
+  const row = document.createElement("div");
+  row.className = "test-question-row";
+  row.innerHTML = `
+    <div class="test-question-header">
+      <strong>Question</strong>
+      <button type="button" class="btn" onclick="this.closest('.test-question-row').remove()">Remove</button>
+    </div>
+    <div class="form-row">
+      <input class="test-question-text" placeholder="Question text" value="${escapeHtml(data.question_text || "")}" />
+      <input class="test-option-a" placeholder="Option A" value="${escapeHtml(data.option_a || "")}" />
+      <input class="test-option-b" placeholder="Option B" value="${escapeHtml(data.option_b || "")}" />
+      <input class="test-option-c" placeholder="Option C" value="${escapeHtml(data.option_c || "")}" />
+      <input class="test-option-d" placeholder="Option D" value="${escapeHtml(data.option_d || "")}" />
+      <select class="test-correct">
+        <option value="A" ${(data.correct_answer || "") === "A" ? "selected" : ""}>Correct: A</option>
+        <option value="B" ${(data.correct_answer || "") === "B" ? "selected" : ""}>Correct: B</option>
+        <option value="C" ${(data.correct_answer || "") === "C" ? "selected" : ""}>Correct: C</option>
+        <option value="D" ${(data.correct_answer || "") === "D" ? "selected" : ""}>Correct: D</option>
+      </select>
+    </div>
+  `;
+  container.appendChild(row);
+}
+
+async function createTest() {
+  if (!authInfo || authInfo.role !== "superuser") return;
+  const title = value("testTitle");
+  const description = value("testDescription");
+  const durationMinutes = Number(value("testDuration") || 30);
+  const assignedRaw = value("testAssignedStudents");
+  if (!title) {
+    alert("Test title is required.");
+    return;
+  }
+  const questions = Array.from(document.querySelectorAll(".test-question-row")).map((row) => ({
+    question_text: (row.querySelector(".test-question-text")?.value || "").trim(),
+    option_a: (row.querySelector(".test-option-a")?.value || "").trim(),
+    option_b: (row.querySelector(".test-option-b")?.value || "").trim(),
+    option_c: (row.querySelector(".test-option-c")?.value || "").trim(),
+    option_d: (row.querySelector(".test-option-d")?.value || "").trim(),
+    correct_answer: (row.querySelector(".test-correct")?.value || "A").trim().toUpperCase(),
+  })).filter((q) => q.question_text && q.option_a && q.option_b && q.option_c && q.option_d && ["A", "B", "C", "D"].includes(q.correct_answer));
+
+  if (!questions.length) {
+    alert("Add at least one complete MCQ question.");
+    return;
+  }
+
+  const assignedStudents = assignedRaw
+    ? assignedRaw.split(",").map((s) => s.trim()).filter(Boolean)
+    : [];
+
+  const res = await authFetch(`${API}/tests`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title,
+      description,
+      duration_minutes: durationMinutes,
+      questions,
+      assigned_students: assignedStudents,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "Failed to create test.");
+    return;
+  }
+  document.getElementById("testTitle").value = "";
+  document.getElementById("testDescription").value = "";
+  document.getElementById("testDuration").value = "30";
+  document.getElementById("testAssignedStudents").value = "";
+  document.getElementById("testQuestionRows").innerHTML = "";
+  addTestQuestionRow();
+  await Promise.all([loadTests(), loadActivityLogs()]);
+  alert("Test created.");
+}
+
+async function loadTests() {
+  const res = await authFetch(`${API}/tests`);
+  if (!res.ok) return;
+  const data = await res.json();
+  if (authInfo && authInfo.role === "superuser") {
+    if (!document.querySelector("#testQuestionRows .test-question-row")) {
+      addTestQuestionRow();
+    }
+    const body = document.getElementById("adminTestsBody");
+    if (!body) return;
+    body.innerHTML = "";
+    if (!data.length) {
+      body.innerHTML = `<tr><td colspan="6" class="empty">No tests created</td></tr>`;
+      return;
+    }
+    data.forEach((t) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${t.test_id}</td>
+        <td>${escapeHtml(t.title || "")}</td>
+        <td>${t.question_count || 0}</td>
+        <td>${t.assignment_count || 0}</td>
+        <td>${t.attempt_count || 0}</td>
+        <td>${t.malpractice_count || 0}</td>
+      `;
+      body.appendChild(tr);
+    });
+    return;
+  }
+  const body = document.getElementById("studentTestsBody");
+  if (!body) return;
+  body.innerHTML = "";
+  if (!data.length) {
+    body.innerHTML = `<tr><td colspan="4" class="empty">No tests assigned</td></tr>`;
+    return;
+  }
+  data.forEach((t) => {
+    const tr = document.createElement("tr");
+    const status = t.attempt_status || "Not started";
+    const canStart = status !== "submitted";
+    tr.innerHTML = `
+      <td>${escapeHtml(t.title || "")}</td>
+      <td>${t.duration_minutes || 30} mins</td>
+      <td>${status}</td>
+      <td>${canStart ? `<button class="btn" data-test-id="${t.test_id}">${status === "in_progress" ? "Resume" : "Start"}</button>` : "Completed"}</td>
+    `;
+    const btn = tr.querySelector("button[data-test-id]");
+    if (btn) {
+      btn.addEventListener("click", async () => {
+        await startTestAttempt(Number(t.test_id));
+      });
+    }
+    body.appendChild(tr);
+  });
+}
+
+async function startTestAttempt(testId) {
+  const [testRes, startRes] = await Promise.all([
+    authFetch(`${API}/tests/${testId}`),
+    authFetch(`${API}/tests/${testId}/start`, { method: "POST" }),
+  ]);
+  if (!testRes.ok || !startRes.ok) {
+    const err = await (startRes.ok ? testRes : startRes).json().catch(() => ({}));
+    alert(err.detail || "Unable to start test.");
+    return;
+  }
+  const test = await testRes.json();
+  const attempt = await startRes.json();
+  currentAttempt = attempt;
+  currentAttemptQuestions = Array.isArray(test.questions) ? test.questions : [];
+  document.getElementById("attemptTestTitle").textContent = test.title || "Test Attempt";
+  renderAttemptQuestions(currentAttemptQuestions, attempt.answers || {});
+  document.getElementById("testAttemptPanel")?.classList.remove("hidden");
+  enableAttemptProtection();
+  startAttemptTimer();
+}
+
+function renderAttemptQuestions(questions, existingAnswers) {
+  const container = document.getElementById("attemptQuestions");
+  if (!container) return;
+  container.innerHTML = "";
+  questions.forEach((q, index) => {
+    const val = String((existingAnswers || {})[q.question_id] || "");
+    const div = document.createElement("div");
+    div.className = "attempt-question attempt-protected";
+    div.innerHTML = `
+      <div><strong>Q${index + 1}. ${escapeHtml(q.question_text || "")}</strong></div>
+      <label><input type="radio" name="attempt-q-${q.question_id}" value="A" ${val === "A" ? "checked" : ""}/> ${escapeHtml(q.option_a || "")}</label><br/>
+      <label><input type="radio" name="attempt-q-${q.question_id}" value="B" ${val === "B" ? "checked" : ""}/> ${escapeHtml(q.option_b || "")}</label><br/>
+      <label><input type="radio" name="attempt-q-${q.question_id}" value="C" ${val === "C" ? "checked" : ""}/> ${escapeHtml(q.option_c || "")}</label><br/>
+      <label><input type="radio" name="attempt-q-${q.question_id}" value="D" ${val === "D" ? "checked" : ""}/> ${escapeHtml(q.option_d || "")}</label>
+    `;
+    container.appendChild(div);
+  });
+}
+
+function collectAttemptAnswers() {
+  return currentAttemptQuestions.map((q) => {
+    const selected = document.querySelector(`input[name="attempt-q-${q.question_id}"]:checked`);
+    return {
+      question_id: q.question_id,
+      answer: selected ? selected.value : "",
+    };
+  });
+}
+
+async function submitCurrentAttempt() {
+  if (!currentAttempt || !currentAttempt.attempt_id) return;
+  const answers = collectAttemptAnswers();
+  const res = await authFetch(`${API}/tests/attempts/${currentAttempt.attempt_id}/submit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ answers }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "Failed to submit.");
+    return;
+  }
+  const data = await res.json();
+  alert(`Test submitted. Score: ${data.score}/${data.total_points}`);
+  endAttemptProtection();
+  currentAttempt = null;
+  currentAttemptQuestions = [];
+  document.getElementById("testAttemptPanel")?.classList.add("hidden");
+  await loadTests();
+}
+
+function startAttemptTimer() {
+  if (!currentAttempt) return;
+  clearInterval(currentAttemptTimer);
+  const endTs = Number(currentAttempt.ends_at_epoch || 0) * 1000;
+  const timerEl = document.getElementById("attemptTimer");
+  const tick = async () => {
+    const leftMs = endTs - Date.now();
+    if (leftMs <= 0) {
+      clearInterval(currentAttemptTimer);
+      if (timerEl) timerEl.textContent = "Time left: 00:00";
+      await submitCurrentAttempt();
+      return;
+    }
+    const totalSec = Math.floor(leftMs / 1000);
+    const mm = String(Math.floor(totalSec / 60)).padStart(2, "0");
+    const ss = String(totalSec % 60).padStart(2, "0");
+    if (timerEl) timerEl.textContent = `Time left: ${mm}:${ss}`;
+  };
+  tick();
+  currentAttemptTimer = setInterval(tick, 1000);
+}
+
+async function reportMalpractice(eventType, details) {
+  if (!currentAttempt || !currentAttempt.attempt_id) return;
+  await authFetch(`${API}/tests/attempts/${currentAttempt.attempt_id}/malpractice`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ event_type: eventType, details }),
+  });
+}
+
+function enableAttemptProtection() {
+  const handler = async (e) => {
+    if (!currentAttempt) return;
+    const key = String(e.key || "").toLowerCase();
+    const blocked = (e.ctrlKey && ["c", "v", "x", "a", "p", "u", "s"].includes(key))
+      || key === "printscreen"
+      || key === "f12";
+    if (blocked) {
+      e.preventDefault();
+      await reportMalpractice("blocked_key", `${e.ctrlKey ? "ctrl+" : ""}${key}`);
+      alert("Malpractice warning: restricted action detected.");
+    }
+  };
+  const contextHandler = async (e) => {
+    if (!currentAttempt) return;
+    e.preventDefault();
+    await reportMalpractice("context_menu", "Right click blocked");
+  };
+  const copyHandler = async (e) => {
+    if (!currentAttempt) return;
+    e.preventDefault();
+    await reportMalpractice("copy_paste", "Copy/Cut/Paste blocked");
+  };
+  const visibilityHandler = async () => {
+    if (!currentAttempt) return;
+    if (document.hidden) {
+      await reportMalpractice("tab_switch", "Visibility changed");
+      alert("Malpractice warning: tab switch detected.");
+    }
+  };
+  window.__attemptProtection = { handler, contextHandler, copyHandler, visibilityHandler };
+  document.addEventListener("keydown", handler, true);
+  document.addEventListener("contextmenu", contextHandler, true);
+  document.addEventListener("copy", copyHandler, true);
+  document.addEventListener("cut", copyHandler, true);
+  document.addEventListener("paste", copyHandler, true);
+  document.addEventListener("visibilitychange", visibilityHandler, true);
+  if (document.documentElement.requestFullscreen) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  }
+}
+
+function endAttemptProtection() {
+  clearInterval(currentAttemptTimer);
+  const p = window.__attemptProtection;
+  if (p) {
+    document.removeEventListener("keydown", p.handler, true);
+    document.removeEventListener("contextmenu", p.contextHandler, true);
+    document.removeEventListener("copy", p.copyHandler, true);
+    document.removeEventListener("cut", p.copyHandler, true);
+    document.removeEventListener("paste", p.copyHandler, true);
+    document.removeEventListener("visibilitychange", p.visibilityHandler, true);
+    window.__attemptProtection = null;
+  }
+  if (document.fullscreenElement && document.exitFullscreen) {
+    document.exitFullscreen().catch(() => {});
+  }
+}
+
 async function loadActivityLogs() {
   const body = document.getElementById("activityBody");
   if (!body) return;
@@ -1063,6 +1655,15 @@ function renderSimpleList(id, items, emptyText) {
 
 function value(id) {
   return (document.getElementById(id)?.value || "").trim();
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function clearInputs(ids) {
@@ -1353,6 +1954,7 @@ function afterLoginInit() {
   loadInterviews();
   loadAnnouncements();
   loadNotifications();
+  loadTests();
   loadFeeSummary();
   if (authInfo && authInfo.role === "superuser") {
     loadRecentFees();
@@ -1363,6 +1965,9 @@ function afterLoginInit() {
   initAnnouncementNotifier();
   const savedSection = localStorage.getItem("activeSection") || (authInfo && authInfo.role === "student" ? "attendance" : "students");
   switchSection(savedSection);
+  if (!document.querySelector("#testQuestionRows .test-question-row")) {
+    addTestQuestionRow();
+  }
 }
 
 async function handleLogin() {
@@ -1414,6 +2019,9 @@ function showApp() {
 }
 
 function logout() {
+  endAttemptProtection();
+  currentAttempt = null;
+  currentAttemptQuestions = [];
   localStorage.removeItem(TOKEN_KEY);
   showHome();
 }
@@ -1442,7 +2050,7 @@ function applyRoleUI() {
 
   document.querySelectorAll(".nav-item").forEach(btn => {
     const section = btn.dataset.section;
-    if (isStudent && (section === "students" || section === "reports" || section === "activity")) {
+    if (isStudent && (section === "students" || section === "reports" || section === "activity" || section === "admissions")) {
       btn.classList.add("hidden");
     } else {
       btn.classList.remove("hidden");
@@ -1474,6 +2082,8 @@ function applyRoleUI() {
   if (studentFees) studentFees.classList.toggle("hidden", !isStudent);
   const addStudentPanel = document.getElementById("addStudentPanel");
   if (addStudentPanel) addStudentPanel.classList.toggle("hidden", isStudent);
+  const bulkPanel = document.getElementById("studentBulkPanel");
+  if (bulkPanel) bulkPanel.classList.toggle("hidden", isStudent);
   const adminTimetablePanel = document.getElementById("adminTimetablePanel");
   if (adminTimetablePanel) adminTimetablePanel.classList.toggle("hidden", isStudent);
   const adminInterviewPanel = document.getElementById("adminInterviewPanel");
@@ -1482,6 +2092,12 @@ function applyRoleUI() {
   if (adminAnnouncementPanel) adminAnnouncementPanel.classList.toggle("hidden", isStudent);
   const adminNotificationPanel = document.getElementById("adminNotificationPanel");
   if (adminNotificationPanel) adminNotificationPanel.classList.toggle("hidden", isStudent);
+  const adminTestsPanel = document.getElementById("adminTestsPanel");
+  if (adminTestsPanel) adminTestsPanel.classList.toggle("hidden", isStudent);
+  const adminTestsListPanel = document.getElementById("adminTestsListPanel");
+  if (adminTestsListPanel) adminTestsListPanel.classList.toggle("hidden", isStudent);
+  const studentTestsPanel = document.getElementById("studentTestsPanel");
+  if (studentTestsPanel) studentTestsPanel.classList.toggle("hidden", !isStudent);
 
   const feesTitle = document.getElementById("feesTitle");
   const feesSubtitle = document.getElementById("feesSubtitle");

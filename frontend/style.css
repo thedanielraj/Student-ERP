@@ -370,6 +370,52 @@ body {
   color: var(--muted);
 }
 
+.student-row-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.student-actions {
+  margin-top: 6px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.student-actions .btn {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.test-question-row {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.test-question-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.attempt-question {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.attempt-protected {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 .metrics {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

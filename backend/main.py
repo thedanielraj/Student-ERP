@@ -43,11 +43,31 @@ COURSE_FEES_INR = {
     "ground operations": 150000.0,
     "cabin crew": 250000.0,
 }
+
+
+def _load_local_env_file(path: Path):
+    if not path.exists():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        k = key.strip()
+        if not k:
+            continue
+        v = value.strip().strip('"').strip("'")
+        os.environ.setdefault(k, v)
+
+
+_load_local_env_file(BASE_DIR / ".env")
+
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "").strip()
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "").strip()
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
 ADMISSIONS_TO_EMAIL = os.getenv("ADMISSIONS_TO_EMAIL", "thedanielraj@outlook.com").strip()
 ADMISSIONS_FROM_EMAIL = os.getenv("ADMISSIONS_FROM_EMAIL", "Arunands ERP <onboarding@resend.dev>").strip()
+ADMISSIONS_PDF_DIR = BASE_DIR / "admissions_pdfs"
 
 init_db()
 
@@ -175,6 +195,15 @@ class AdmissionRequest(BaseModel):
 class ActivityUndoRequest(BaseModel):
     activity_id: int
 
+
+class StudentIdsRequest(BaseModel):
+    student_ids: List[str]
+
+
+class StudentsBulkBatchRequest(BaseModel):
+    student_ids: List[str]
+    batch: str
+
 def _create_session(username: str) -> str:
     token = uuid4().hex
     SESSIONS[token] = {"user": username, "last_activity": time.time()}
@@ -204,6 +233,32 @@ def _require_superuser(user: dict):
 def _require_self_or_superuser(user: dict, student_id: str):
     if user and not _is_superuser(user) and user["user"] != student_id:
         raise HTTPException(status_code=403, detail="Forbidden")
+
+
+def _parse_razorpay_refs(remarks: str):
+    text = str(remarks or "")
+    payment_match = re.search(r"payment_id=([A-Za-z0-9_]+)", text, flags=re.IGNORECASE)
+    order_match = re.search(r"order_id=([A-Za-z0-9_]+)", text, flags=re.IGNORECASE)
+    return {
+        "payment_id": payment_match.group(1) if payment_match else "",
+        "order_id": order_match.group(1) if order_match else "",
+    }
+
+
+def _to_iso_date(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return time.strftime("%Y-%m-%d")
+    if " " in raw and "T" not in raw:
+        raw = raw.replace(" ", "T")
+    if not raw.endswith("Z"):
+        raw = f"{raw}Z"
+    try:
+        from datetime import datetime
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return dt.strftime("%Y-%m-%d")
+    except Exception:
+        return time.strftime("%Y-%m-%d")
 
 
 def _ensure_activity_table():
@@ -355,6 +410,26 @@ def _send_admission_email(first_name: str, middle_name: str, last_name: str, pho
     except Exception:
         return False
 
+
+def _save_admission_pdf_local(pdf_base64: str, pdf_filename: str):
+    encoded = str(pdf_base64 or "").strip()
+    if not encoded:
+        return {"saved": False, "path": None, "bytes": 0}
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid admission PDF")
+    max_bytes = 1024 * 1024
+    if len(raw) > max_bytes:
+        raise HTTPException(status_code=413, detail="Admission PDF must be less than 1 MB")
+    ADMISSIONS_PDF_DIR.mkdir(parents=True, exist_ok=True)
+    safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", (pdf_filename or "").strip()) or f"admission_{int(time.time())}.pdf"
+    if not safe_name.lower().endswith(".pdf"):
+        safe_name += ".pdf"
+    filepath = ADMISSIONS_PDF_DIR / f"{uuid4().hex}_{safe_name}"
+    filepath.write_bytes(raw)
+    return {"saved": True, "path": str(filepath), "bytes": len(raw)}
+
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
@@ -449,7 +524,7 @@ def public_student_ids():
 @app.get("/public/alumni")
 def public_alumni():
     conn = get_connection()
-    rows = conn.execute(
+    selected_rows = conn.execute(
         """
         SELECT student_id, student_name, MAX(date) AS last_selected_date
         FROM attendance
@@ -457,11 +532,23 @@ def public_alumni():
           AND TRIM(remarks) <> ''
           AND lower(remarks) LIKE '%selected%'
         GROUP BY student_id, student_name
-        ORDER BY last_selected_date DESC, student_name ASC
+        """
+    ).fetchall()
+    alumni_rows = conn.execute(
+        """
+        SELECT student_id, student_name, NULL AS last_selected_date
+        FROM students
+        WHERE lower(COALESCE(status, 'active')) = 'alumni'
         """
     ).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    by_id = {}
+    for row in list(selected_rows) + list(alumni_rows):
+        by_id[str(row["student_id"])] = dict(row)
+    rows = list(by_id.values())
+    rows.sort(key=lambda r: str(r.get("student_name") or "").lower())
+    rows.sort(key=lambda r: str(r.get("last_selected_date") or ""), reverse=True)
+    return rows
 
 
 def _ensure_admissions_table():
@@ -470,6 +557,7 @@ def _ensure_admissions_table():
         """
         CREATE TABLE IF NOT EXISTS admissions (
             admission_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            full_name TEXT NOT NULL DEFAULT '',
             first_name TEXT NOT NULL,
             middle_name TEXT,
             last_name TEXT NOT NULL,
@@ -492,6 +580,8 @@ def _ensure_admissions_table():
             permanent_address TEXT,
             course TEXT NOT NULL,
             academic_details_json TEXT NOT NULL DEFAULT '[]',
+            admission_pdf_path TEXT,
+            admission_pdf_bytes INTEGER,
             status TEXT NOT NULL DEFAULT 'new',
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
@@ -499,6 +589,7 @@ def _ensure_admissions_table():
     )
     existing = {row["name"] for row in conn.execute("PRAGMA table_info(admissions)").fetchall()}
     expected = {
+        "full_name": "TEXT NOT NULL DEFAULT ''",
         "first_name": "TEXT",
         "middle_name": "TEXT",
         "last_name": "TEXT",
@@ -521,6 +612,8 @@ def _ensure_admissions_table():
         "permanent_address": "TEXT",
         "course": "TEXT",
         "academic_details_json": "TEXT NOT NULL DEFAULT '[]'",
+        "admission_pdf_path": "TEXT",
+        "admission_pdf_bytes": "INTEGER",
         "status": "TEXT",
         "created_at": "TEXT",
     }
@@ -536,6 +629,7 @@ def admissions_apply(payload: AdmissionRequest):
     first_name = payload.first_name.strip()
     middle_name = payload.middle_name.strip()
     last_name = payload.last_name.strip()
+    full_name = " ".join([p for p in [first_name, middle_name, last_name] if p]).strip()
     phone = payload.phone.strip()
     email = payload.email.strip()
     blood_group = payload.blood_group.strip()
@@ -561,19 +655,24 @@ def admissions_apply(payload: AdmissionRequest):
         raise HTTPException(status_code=400, detail="Missing required fields")
 
     _ensure_admissions_table()
+    pdf_saved = _save_admission_pdf_local(admission_pdf_base64, admission_pdf_filename)
     conn = get_connection()
     cur = conn.execute(
         """
         INSERT INTO admissions (
+            full_name,
             first_name, middle_name, last_name, phone, email, blood_group, age, dob, aadhaar_number, nationality,
             father_name, father_phone, father_occupation, father_email, mother_name, mother_phone, mother_occupation, mother_email,
-            correspondence_address, permanent_address, course, academic_details_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            correspondence_address, permanent_address, course, academic_details_json, admission_pdf_path, admission_pdf_bytes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
+            full_name,
             first_name, middle_name, last_name, phone, email, blood_group, age, dob, aadhaar_number, nationality,
             father_name, father_phone, father_occupation, father_email, mother_name, mother_phone, mother_occupation, mother_email,
             correspondence_address, permanent_address, course, academic_details_json,
+            pdf_saved["path"],
+            int(pdf_saved["bytes"]),
         ),
     )
     admission_id = cur.lastrowid
@@ -583,12 +682,118 @@ def admissions_apply(payload: AdmissionRequest):
         {"user": "public_admission_form"},
         "admission_submitted",
         f"Admission submitted: {first_name} {last_name} ({course})",
-        {"admission_id": admission_id, "first_name": first_name, "last_name": last_name, "course": course, "phone": phone, "email": email},
+        {
+            "admission_id": admission_id,
+            "first_name": first_name,
+            "last_name": last_name,
+            "course": course,
+            "phone": phone,
+            "email": email,
+            "admission_pdf_path": pdf_saved["path"],
+            "admission_pdf_bytes": int(pdf_saved["bytes"]),
+        },
     )
     email_sent = _send_admission_email(
         first_name, middle_name, last_name, phone, email, course, admission_pdf_base64, admission_pdf_filename
     )
-    return {"status": "ok", "message": "Admission form submitted", "email_sent": email_sent}
+    return {
+        "status": "ok",
+        "message": "Admission form submitted",
+        "email_sent": email_sent,
+        "pdf_stored": bool(pdf_saved["saved"]),
+        "pdf_bytes": int(pdf_saved["bytes"]),
+    }
+
+
+@app.get("/admissions")
+def admissions_list(request: Request):
+    user = _get_current_user(request)
+    _require_superuser(user)
+    _ensure_admissions_table()
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT
+            admission_id,
+            first_name,
+            middle_name,
+            last_name,
+            course,
+            phone,
+            email,
+            created_at,
+            admission_pdf_path,
+            admission_pdf_bytes
+        FROM admissions
+        ORDER BY admission_id DESC
+        LIMIT 500
+        """
+    ).fetchall()
+    conn.close()
+    out = []
+    for r in rows:
+        full_name = " ".join([p for p in [r["first_name"], r["middle_name"], r["last_name"]] if p]).strip()
+        out.append(
+            {
+                "admission_id": r["admission_id"],
+                "full_name": full_name,
+                "course": r["course"] or "",
+                "phone": r["phone"] or "",
+                "email": r["email"] or "",
+                "created_at": r["created_at"] or "",
+                "pdf_available": bool((r["admission_pdf_path"] or "").strip()),
+                "pdf_bytes": int(r["admission_pdf_bytes"] or 0),
+            }
+        )
+    return out
+
+
+@app.get("/admissions/{admission_id}/pdf")
+def admissions_pdf(admission_id: int, request: Request):
+    user = _get_current_user(request)
+    _require_superuser(user)
+    _ensure_admissions_table()
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT admission_pdf_path, first_name, last_name FROM admissions WHERE admission_id = ?",
+        (admission_id,),
+    ).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Admission not found")
+    pdf_path = str(row["admission_pdf_path"] or "").strip()
+    if not pdf_path:
+        raise HTTPException(status_code=404, detail="Admission PDF not found")
+    path = Path(pdf_path)
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Admission PDF file missing")
+    safe_first = re.sub(r"[^A-Za-z0-9._-]", "_", str(row["first_name"] or "admission"))
+    safe_last = re.sub(r"[^A-Za-z0-9._-]", "_", str(row["last_name"] or ""))
+    filename = f"{safe_first}{'_' + safe_last if safe_last else ''}_{admission_id}.pdf"
+    return FileResponse(path, media_type="application/pdf", filename=filename)
+
+
+@app.delete("/admissions/{admission_id}")
+def admissions_delete(admission_id: int, request: Request):
+    user = _get_current_user(request)
+    _require_superuser(user)
+    _ensure_admissions_table()
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM admissions WHERE admission_id = ?", (admission_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Admission not found")
+    conn.execute("DELETE FROM admissions WHERE admission_id = ?", (admission_id,))
+    conn.commit()
+    conn.close()
+    full_name = str(row["full_name"] or " ".join([p for p in [row["first_name"], row["middle_name"], row["last_name"]] if p]).strip())
+    _log_activity(
+        user,
+        "admission_deleted",
+        f"Deleted admission #{admission_id}{f' ({full_name})' if full_name else ''}",
+        {"admission": dict(row)},
+    )
+    return {"status": "ok", "message": "Admission deleted"}
 
 @app.get("/students")
 def list_students(request: Request):
@@ -624,6 +829,119 @@ def add_student(student_name: str, course: str, batch: str, request: Request):
     })
     _ensure_passwords_for_students()
     return {"status": "ok", "message": "Student added"}
+
+
+def _normalize_student_ids(values: List[str]) -> List[str]:
+    seen = set()
+    cleaned = []
+    for value in values or []:
+        sid = str(value or "").strip()
+        if sid and sid not in seen:
+            seen.add(sid)
+            cleaned.append(sid)
+    return cleaned
+
+
+@app.post("/students/bulk-batch")
+def students_bulk_batch(payload: StudentsBulkBatchRequest, request: Request):
+    user = _get_current_user(request)
+    _require_superuser(user)
+    student_ids = _normalize_student_ids(payload.student_ids)
+    batch = str(payload.batch or "").strip()
+    if not student_ids or not batch:
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    conn = get_connection()
+    previous_batches = {}
+    for sid in student_ids:
+        row = conn.execute("SELECT batch FROM students WHERE student_id = ?", (sid,)).fetchone()
+        if row and row["batch"]:
+            previous_batches[sid] = str(row["batch"])
+        conn.execute("UPDATE students SET batch = ? WHERE student_id = ?", (batch, sid))
+        conn.execute("UPDATE attendance SET batch = ? WHERE student_id = ?", (batch, sid))
+    conn.commit()
+    conn.close()
+    _log_activity(
+        user,
+        "students_batch_updated",
+        f"Moved {len(student_ids)} student(s) to batch {batch}",
+        {"student_ids": student_ids, "batch": batch, "previous_batches": previous_batches},
+    )
+    return {"status": "ok", "updated": len(student_ids)}
+
+
+@app.post("/students/mark-alumni")
+def students_mark_alumni(payload: StudentIdsRequest, request: Request):
+    user = _get_current_user(request)
+    _require_superuser(user)
+    student_ids = _normalize_student_ids(payload.student_ids)
+    if not student_ids:
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    conn = get_connection()
+    previous_status = {}
+    for sid in student_ids:
+        row = conn.execute("SELECT status FROM students WHERE student_id = ?", (sid,)).fetchone()
+        previous_status[sid] = str((row["status"] if row else "Active") or "Active")
+        conn.execute("UPDATE students SET status = 'Alumni' WHERE student_id = ?", (sid,))
+    conn.commit()
+    conn.close()
+    _log_activity(
+        user,
+        "students_marked_alumni",
+        f"Marked {len(student_ids)} student(s) as alumni",
+        {"student_ids": student_ids, "previous_status": previous_status},
+    )
+    return {"status": "ok", "updated": len(student_ids)}
+
+
+@app.post("/students/delete")
+def students_delete(payload: StudentIdsRequest, request: Request):
+    user = _get_current_user(request)
+    _require_superuser(user)
+    student_ids = _normalize_student_ids(payload.student_ids)
+    if not student_ids:
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    conn = get_connection()
+    snapshots = []
+    for sid in student_ids:
+        student = conn.execute(
+            "SELECT student_id, student_name, course, batch, status FROM students WHERE student_id = ?",
+            (sid,),
+        ).fetchone()
+        if not student:
+            continue
+        attendance_rows = conn.execute(
+            "SELECT student_name, course, batch, date, attendance_status, remarks FROM attendance WHERE student_id = ?",
+            (sid,),
+        ).fetchall()
+        fee_rows = conn.execute(
+            "SELECT amount_total, amount_paid, due_date, remarks, receipt_path FROM fees WHERE student_id = ?",
+            (sid,),
+        ).fetchall()
+        snapshots.append({
+            "student": dict(student),
+            "attendance": [dict(r) for r in attendance_rows],
+            "fees": [dict(r) for r in fee_rows],
+        })
+        conn.execute("DELETE FROM attendance WHERE student_id = ?", (sid,))
+        conn.execute("DELETE FROM fees WHERE student_id = ?", (sid,))
+        conn.execute("DELETE FROM students WHERE student_id = ?", (sid,))
+    conn.commit()
+    conn.close()
+    passwords = _load_passwords()
+    changed = False
+    for sid in student_ids:
+        if sid in passwords:
+            passwords.pop(sid, None)
+            changed = True
+    if changed:
+        _save_passwords(passwords)
+    _log_activity(
+        user,
+        "students_deleted",
+        f"Deleted {len(snapshots)} student(s)",
+        {"students": snapshots},
+    )
+    return {"status": "ok", "deleted": len(snapshots)}
 
 @app.get("/students/{student_id}/balance")
 def student_balance(student_id: str, request: Request):
@@ -665,7 +983,7 @@ def student_fees(student_id: str, request: Request):
     _require_self_or_superuser(user, student_id)
     conn = get_connection()
     rows = conn.execute("""
-        SELECT fee_id, amount_total, amount_paid, due_date, remarks
+        SELECT fee_id, amount_total, amount_paid, due_date, remarks, created_at
         FROM fees
         WHERE student_id = ?
         ORDER BY fee_id DESC
@@ -876,6 +1194,10 @@ def activity_logs(request: Request):
         action_type = r["action_type"]
         undoable = (not bool(r["undone"])) and action_type in (
             "student_added",
+            "students_batch_updated",
+            "students_marked_alumni",
+            "students_deleted",
+            "admission_deleted",
             "attendance_recorded",
             "fee_recorded",
             "timetable_created",
@@ -925,6 +1247,83 @@ def activity_undo(payload: ActivityUndoRequest, request: Request):
             conn.close()
             raise HTTPException(status_code=400, detail="Undo payload missing student_id")
         conn.execute("DELETE FROM students WHERE student_id = ?", (sid,))
+        passwords = _load_passwords()
+        if sid in passwords:
+            passwords.pop(sid, None)
+            _save_passwords(passwords)
+    elif action == "students_batch_updated":
+        student_ids = p.get("student_ids", []) if isinstance(p.get("student_ids", []), list) else []
+        previous_batches = p.get("previous_batches", {}) if isinstance(p.get("previous_batches", {}), dict) else {}
+        if not student_ids:
+            conn.close()
+            raise HTTPException(status_code=400, detail="Undo payload missing student_ids")
+        for sid in student_ids:
+            prev = str(previous_batches.get(str(sid), "")).strip()
+            if not prev:
+                continue
+            conn.execute("UPDATE students SET batch = ? WHERE student_id = ?", (prev, str(sid)))
+            conn.execute("UPDATE attendance SET batch = ? WHERE student_id = ?", (prev, str(sid)))
+    elif action == "students_marked_alumni":
+        student_ids = p.get("student_ids", []) if isinstance(p.get("student_ids", []), list) else []
+        previous_status = p.get("previous_status", {}) if isinstance(p.get("previous_status", {}), dict) else {}
+        if not student_ids:
+            conn.close()
+            raise HTTPException(status_code=400, detail="Undo payload missing student_ids")
+        for sid in student_ids:
+            status = str(previous_status.get(str(sid), "Active")).strip() or "Active"
+            conn.execute("UPDATE students SET status = ? WHERE student_id = ?", (status, str(sid)))
+    elif action == "students_deleted":
+        students = p.get("students", []) if isinstance(p.get("students", []), list) else []
+        if not students:
+            conn.close()
+            raise HTTPException(status_code=400, detail="Undo payload missing students")
+        for snapshot in students:
+            student = snapshot.get("student", {}) if isinstance(snapshot, dict) else {}
+            sid = str(student.get("student_id", "")).strip()
+            if not sid:
+                continue
+            conn.execute(
+                "INSERT OR IGNORE INTO students (student_id, student_name, course, batch, status) VALUES (?, ?, ?, ?, ?)",
+                (
+                    sid,
+                    str(student.get("student_name", "")),
+                    str(student.get("course", "")),
+                    str(student.get("batch", "")),
+                    str(student.get("status", "Active") or "Active"),
+                ),
+            )
+            for att in snapshot.get("attendance", []) if isinstance(snapshot.get("attendance", []), list) else []:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO attendance (student_id, student_name, course, batch, date, attendance_status, remarks)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        sid,
+                        str(att.get("student_name", student.get("student_name", ""))),
+                        str(att.get("course", student.get("course", ""))),
+                        str(att.get("batch", student.get("batch", ""))),
+                        str(att.get("date", "")),
+                        str(att.get("attendance_status", "A")),
+                        str(att.get("remarks", "")),
+                    ),
+                )
+            for fee in snapshot.get("fees", []) if isinstance(snapshot.get("fees", []), list) else []:
+                conn.execute(
+                    """
+                    INSERT INTO fees (student_id, amount_total, amount_paid, due_date, remarks, receipt_path)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        sid,
+                        float(fee.get("amount_total", 0) or 0),
+                        float(fee.get("amount_paid", 0) or 0),
+                        str(fee.get("due_date", "")),
+                        str(fee.get("remarks", "")),
+                        str(fee.get("receipt_path", "")),
+                    ),
+                )
+        _ensure_passwords_for_students()
     elif action == "attendance_recorded":
         date = str(p.get("date", "")).strip()
         student_ids = p.get("student_ids", []) if isinstance(p.get("student_ids", []), list) else []
@@ -970,6 +1369,52 @@ def activity_undo(payload: ActivityUndoRequest, request: Request):
             raise HTTPException(status_code=400, detail="Undo payload missing admission_id")
         _ensure_admissions_table()
         conn.execute("DELETE FROM admissions WHERE admission_id = ?", (admission_id,))
+    elif action == "admission_deleted":
+        admission = p.get("admission", {}) if isinstance(p.get("admission", {}), dict) else {}
+        if not admission or not admission.get("admission_id"):
+            conn.close()
+            raise HTTPException(status_code=400, detail="Undo payload missing admission")
+        _ensure_admissions_table()
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO admissions (
+                admission_id, full_name, first_name, middle_name, last_name, phone, email, blood_group, age, dob,
+                aadhaar_number, nationality, father_name, father_phone, father_occupation, father_email,
+                mother_name, mother_phone, mother_occupation, mother_email, correspondence_address,
+                permanent_address, course, academic_details_json, admission_pdf_path, admission_pdf_bytes, status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(admission.get("admission_id", 0) or 0),
+                str(admission.get("full_name", "")),
+                str(admission.get("first_name", "")),
+                str(admission.get("middle_name", "")),
+                str(admission.get("last_name", "")),
+                str(admission.get("phone", "")),
+                str(admission.get("email", "")),
+                str(admission.get("blood_group", "")),
+                int(admission.get("age", 0) or 0),
+                str(admission.get("dob", "")),
+                str(admission.get("aadhaar_number", "")),
+                str(admission.get("nationality", "")),
+                str(admission.get("father_name", "")),
+                str(admission.get("father_phone", "")),
+                str(admission.get("father_occupation", "")),
+                str(admission.get("father_email", "")),
+                str(admission.get("mother_name", "")),
+                str(admission.get("mother_phone", "")),
+                str(admission.get("mother_occupation", "")),
+                str(admission.get("mother_email", "")),
+                str(admission.get("correspondence_address", "")),
+                str(admission.get("permanent_address", "")),
+                str(admission.get("course", "")),
+                str(admission.get("academic_details_json", "[]")),
+                str(admission.get("admission_pdf_path", "")),
+                int(admission.get("admission_pdf_bytes", 0) or 0),
+                str(admission.get("status", "new")),
+                str(admission.get("created_at", "")),
+            ),
+        )
     else:
         conn.close()
         raise HTTPException(status_code=400, detail="This action is not undoable")
@@ -1111,7 +1556,7 @@ def recent_fees(request: Request):
     if user and not _is_superuser(user):
         rows = conn.execute(
             """
-            SELECT fee_id, student_id, amount_total, amount_paid, due_date, remarks
+            SELECT fee_id, student_id, amount_total, amount_paid, due_date, remarks, created_at
             FROM fees
             WHERE student_id = ?
             ORDER BY fee_id DESC
@@ -1122,7 +1567,7 @@ def recent_fees(request: Request):
     else:
         rows = conn.execute(
             """
-            SELECT fee_id, student_id, amount_total, amount_paid, due_date, remarks
+            SELECT fee_id, student_id, amount_total, amount_paid, due_date, remarks, created_at
             FROM fees
             ORDER BY fee_id DESC
             LIMIT 20
@@ -1130,6 +1575,53 @@ def recent_fees(request: Request):
         ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+@app.get("/fees/{fee_id}/invoice")
+def fee_invoice(fee_id: int, request: Request):
+    user = _get_current_user(request)
+    conn = get_connection()
+    row = conn.execute(
+        """
+        SELECT
+          f.fee_id,
+          f.student_id,
+          f.amount_total,
+          f.amount_paid,
+          f.remarks,
+          f.created_at,
+          s.student_name,
+          s.course
+        FROM fees f
+        LEFT JOIN students s ON s.student_id = f.student_id
+        WHERE f.fee_id = ?
+        """,
+        (fee_id,),
+    ).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Fee entry not found")
+
+    _require_self_or_superuser(user, row["student_id"])
+    info = _student_financials(conn, row["student_id"])
+    conn.close()
+    refs = _parse_razorpay_refs(row["remarks"])
+    default_due = max(float(row["amount_total"] or 0) - float(row["amount_paid"] or 0), 0.0)
+
+    return {
+        "invoice": {
+            "invoice_no": f"AAI-INV-{int(row['fee_id'])}",
+            "date": _to_iso_date(row["created_at"]),
+            "student_id": row["student_id"] or "",
+            "student_name": row["student_name"] or "",
+            "course": row["course"] or "",
+            "payment_id": refs["payment_id"],
+            "order_id": refs["order_id"],
+            "amount_paid": float(row["amount_paid"] or 0),
+            "amount_total": float(row["amount_total"] or 0),
+            "balance_due": float(info["due"]) if info else default_due,
+        }
+    }
 
 
 @app.get("/fees/summary")
@@ -1256,16 +1748,34 @@ def verify_razorpay_payment(payload: RazorpayVerifyRequest, request: Request):
         f"Razorpay payment_id={payload.razorpay_payment_id}, "
         f"order_id={payload.razorpay_order_id}"
     )
-    conn.execute(
+    cur = conn.execute(
         """
         INSERT INTO fees (student_id, amount_total, amount_paid, remarks)
         VALUES (?, ?, ?, ?)
         """,
         (payload.student_id, float(info["total"]), amount_paid, remarks),
     )
+    fee_id = cur.lastrowid
+    balance_due = max(float(info["due"]) - amount_paid, 0.0)
     conn.commit()
     conn.close()
-    return {"status": "ok", "message": "Payment verified and recorded", "amount_paid_inr": amount_paid}
+    return {
+        "status": "ok",
+        "message": "Payment verified and recorded",
+        "amount_paid_inr": amount_paid,
+        "invoice": {
+            "invoice_no": f"AAI-INV-{int(fee_id)}",
+            "date": time.strftime("%Y-%m-%d"),
+            "student_id": payload.student_id,
+            "student_name": info["student"]["student_name"],
+            "course": info["student"]["course"] or "",
+            "payment_id": payload.razorpay_payment_id,
+            "order_id": payload.razorpay_order_id,
+            "amount_paid": amount_paid,
+            "amount_total": float(info["total"]),
+            "balance_due": balance_due,
+        },
+    }
 
 
 @app.get("/timetable")

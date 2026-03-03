@@ -44,6 +44,8 @@ It helps you:
   - Record payments per student.
   - Upload receipt files (`png`, `pdf`, and other file types).
   - Student-facing remaining balance view.
+  - Student Razorpay payment flow with post-payment invoice PDF download.
+  - Staff can generate invoice PDF from fee entries in portal.
 - Session handling:
   - Session expires after 5 minutes of inactivity.
   - Refresh keeps your current tab while session is valid.
@@ -121,6 +123,10 @@ aviation_erp/
 - `POST /attendance/sync`
 - `POST /fees/record`
 - `GET /fees/recent`
+- `GET /fees/{fee_id}/invoice`
+- `GET /payments/gateway-status`
+- `POST /payments/razorpay/order`
+- `POST /payments/razorpay/verify`
 - `GET /reports/summary`
 
 ## Tests
@@ -197,9 +203,14 @@ wrangler d1 migrations apply student-erp-db
 ### 4. Set Razorpay secrets (optional but required for payments)
 
 ```bash
-wrangler pages secret put RAZORPAY_KEY_ID
-wrangler pages secret put RAZORPAY_KEY_SECRET
+wrangler pages secret put RAZORPAY_KEY_ID --project-name student-erp
+wrangler pages secret put RAZORPAY_KEY_SECRET --project-name student-erp
 ```
+
+Important:
+- secret names must be exactly `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET`
+- add them to the **Production** environment in Pages
+- redeploy after updating secrets
 
 ### 5. Deploy
 
@@ -211,6 +222,26 @@ After deploy:
 - frontend is served from Pages
 - API available at `/api/*` via Functions
 - storage uses D1 + R2
+- student payments show `Razorpay ready` only when both secrets are configured
+
+### Local Razorpay setup (developer machine)
+
+- For FastAPI local run, create `backend/.env`:
+
+```bash
+RAZORPAY_KEY_ID=...
+RAZORPAY_KEY_SECRET=...
+```
+
+- For `wrangler pages dev`, create `.dev.vars`:
+
+```bash
+RAZORPAY_KEY_ID=...
+RAZORPAY_KEY_SECRET=...
+SESSION_TIMEOUT_SECONDS=300
+```
+
+Both files are local-only and gitignored.
 
 ### Attendance import on Cloudflare
 
