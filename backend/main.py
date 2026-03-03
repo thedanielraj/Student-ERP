@@ -39,6 +39,10 @@ RECEIPTS_DIR = BASE_DIR / "receipts"
 PASSWORDS_PATH = BASE_DIR.parent / "passwords.txt"
 SESSION_TIMEOUT_SECONDS = 300
 SESSIONS = {}
+STAFF_USERS = {
+    "praharsh": {"password": "9121726565", "display_name": "Praharsh", "welcome": "Welcome Praharsh Sir!"},
+    "nanda": {"password": "8124326444", "display_name": "Nanda", "welcome": "Welcome Nanda Sir!"},
+}
 COURSE_FEES_INR = {
     "ground operations": 150000.0,
     "cabin crew": 250000.0,
@@ -96,8 +100,11 @@ def _ensure_passwords_for_students():
     passwords = _load_passwords()
     if "superuser" not in passwords:
         passwords["superuser"] = "qwerty"
-
     updated = False
+    for username, config in STAFF_USERS.items():
+        if username not in passwords:
+            passwords[username] = str(config["password"])
+            updated = True
     valid_ids = set()
     for sid in student_ids:
         if re.search(r"\d", str(sid)):
@@ -107,7 +114,8 @@ def _ensure_passwords_for_students():
                 updated = True
 
     # Remove invalid student ids (no digits) from passwords
-    to_remove = [u for u in passwords.keys() if u != "superuser" and u not in valid_ids]
+    protected_users = {"superuser", *STAFF_USERS.keys()}
+    to_remove = [u for u in passwords.keys() if u not in protected_users and u not in valid_ids]
     if to_remove:
         for u in to_remove:
             passwords.pop(u, None)
@@ -163,6 +171,22 @@ class RazorpayVerifyRequest(BaseModel):
     razorpay_order_id: str
     razorpay_signature: str
     amount_paid_inr: float
+
+
+class FeePolicyUpdateRequest(BaseModel):
+    student_id: str
+    concession_amount: Optional[float] = 0
+    due_date: Optional[str] = None
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class AdminSetPasswordRequest(BaseModel):
+    username: str
+    new_password: str
 
 
 class AdmissionRequest(BaseModel):
@@ -223,7 +247,10 @@ def _get_current_user(request: Request):
     return getattr(request.state, "user", None)
 
 def _is_superuser(user: dict) -> bool:
-    return user and user.get("user") == "superuser"
+    if not user:
+        return False
+    username = str(user.get("user") or "").lower()
+    return username == "superuser" or username in STAFF_USERS
 
 def _require_superuser(user: dict):
     if not _is_superuser(user):
@@ -233,6 +260,22 @@ def _require_superuser(user: dict):
 def _require_self_or_superuser(user: dict, student_id: str):
     if user and not _is_superuser(user) and user["user"] != student_id:
         raise HTTPException(status_code=403, detail="Forbidden")
+
+
+def _ensure_fee_policies_table():
+    conn = get_connection()
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS fee_policies (
+            student_id TEXT PRIMARY KEY,
+            concession_amount REAL NOT NULL DEFAULT 0,
+            due_date TEXT,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
 
 
 def _parse_razorpay_refs(remarks: str):
@@ -313,6 +356,7 @@ def _course_fee_inr(course: str) -> Optional[float]:
 
 
 def _student_financials(conn, student_id: str):
+    _ensure_fee_policies_table()
     student = conn.execute(
         "SELECT student_id, student_name, course, batch FROM students WHERE student_id = ?",
         (student_id,),
@@ -332,12 +376,25 @@ def _student_financials(conn, student_id: str):
         (student_id,),
     ).fetchone()
 
+    policy = conn.execute(
+        "SELECT concession_amount, due_date FROM fee_policies WHERE student_id = ?",
+        (student_id,),
+    ).fetchone()
+
     planned = _course_fee_inr(student["course"])
-    total = float(planned if planned is not None else fee["max_total"])
+    base_total = float(planned if planned is not None else fee["max_total"])
+    concession_amount = min(
+        max(float((policy["concession_amount"] if policy else 0) or 0), 0.0),
+        max(base_total, 0.0),
+    )
+    total = max(base_total - concession_amount, 0.0)
     paid = float(fee["paid"])
     due = max(total - paid, 0.0)
     return {
         "student": dict(student),
+        "base_total": base_total,
+        "concession_amount": concession_amount,
+        "due_date": (policy["due_date"] if policy else None),
         "total": total,
         "paid": paid,
         "due": due,
@@ -960,6 +1017,8 @@ def student_balance(student_id: str, request: Request):
         "total": info["total"],
         "paid": info["paid"],
         "balance": info["due"],
+        "concession_amount": info["concession_amount"],
+        "due_date": info["due_date"],
         "gst_percent": 18,
     }
 
@@ -1144,8 +1203,10 @@ def auth_me(request: Request):
     if not session:
         raise HTTPException(status_code=401, detail="Session expired")
     user = session["user"]
-    if user == "superuser":
-        return {"status": "ok", "user": user, "role": "superuser"}
+    user_key = str(user or "").lower()
+    if user_key == "superuser" or user_key in STAFF_USERS:
+        welcome = STAFF_USERS[user_key]["welcome"] if user_key in STAFF_USERS else ""
+        return {"status": "ok", "user": user, "role": "superuser", "welcome_message": welcome}
 
     conn = get_connection()
     student = conn.execute(
@@ -1167,6 +1228,48 @@ def auth_me(request: Request):
         "course": student["course"] if student else "",
         "batch": student["batch"] if student else "",
     }
+
+
+@app.post("/auth/change-password")
+def auth_change_password(payload: ChangePasswordRequest, request: Request):
+    user = _get_current_user(request)
+    username = str((user or {}).get("user") or "").strip()
+    if not username:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    _ensure_passwords_for_students()
+    passwords = _load_passwords()
+    current = str(payload.current_password or "")
+    new_password = str(payload.new_password or "")
+    if not current or not new_password:
+        raise HTTPException(status_code=400, detail="current_password and new_password are required")
+    if len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+    if passwords.get(username) != current:
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    passwords[username] = new_password
+    _save_passwords(passwords)
+    _log_activity(user, "password_changed", f"Password changed for {username}", {"username": username})
+    return {"status": "ok", "message": "Password updated"}
+
+
+@app.post("/admin/users/password")
+def admin_set_user_password(payload: AdminSetPasswordRequest, request: Request):
+    user = _get_current_user(request)
+    _require_superuser(user)
+    username = str(payload.username or "").strip()
+    new_password = str(payload.new_password or "")
+    if not username or not new_password:
+        raise HTTPException(status_code=400, detail="username and new_password are required")
+    if len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+    _ensure_passwords_for_students()
+    passwords = _load_passwords()
+    if username not in passwords:
+        raise HTTPException(status_code=404, detail="User not found")
+    passwords[username] = new_password
+    _save_passwords(passwords)
+    _log_activity(user, "password_reset", f"Password reset for {username}", {"username": username})
+    return {"status": "ok", "message": "User password updated"}
 
 
 @app.get("/activity/logs")
@@ -1517,8 +1620,13 @@ async def record_fee(
 ):
     user = _get_current_user(request)
     _require_superuser(user)
+    conn = get_connection()
+    info = _student_financials(conn, student_id)
+    if not info:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Student not found")
     if amount_total is None:
-        amount_total = amount_paid
+        amount_total = float(info["total"])
 
     receipt_path = None
     if receipt is not None:
@@ -1575,6 +1683,111 @@ def recent_fees(request: Request):
         ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+@app.get("/fees/admin/policies")
+def fees_admin_policies(request: Request):
+    user = _get_current_user(request)
+    _require_superuser(user)
+    _ensure_fee_policies_table()
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT student_id, concession_amount, due_date, updated_at FROM fee_policies ORDER BY student_id ASC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.post("/fees/admin/policy")
+def fees_admin_policy(payload: FeePolicyUpdateRequest, request: Request):
+    user = _get_current_user(request)
+    _require_superuser(user)
+    student_id = str(payload.student_id or "").strip()
+    if not student_id:
+        raise HTTPException(status_code=400, detail="student_id is required")
+    _ensure_fee_policies_table()
+    conn = get_connection()
+    info_before = _student_financials(conn, student_id)
+    if not info_before:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    concession = max(float(payload.concession_amount or 0), 0.0)
+    concession = min(concession, max(float(info_before["base_total"]), 0.0))
+    due_date = (payload.due_date or "").strip()
+    if due_date and not re.match(r"^\d{4}-\d{2}-\d{2}$", due_date):
+        conn.close()
+        raise HTTPException(status_code=400, detail="due_date must be YYYY-MM-DD")
+    due_date = due_date or None
+
+    conn.execute(
+        """
+        INSERT INTO fee_policies (student_id, concession_amount, due_date, updated_at)
+        VALUES (?, ?, ?, datetime('now'))
+        ON CONFLICT(student_id) DO UPDATE SET
+          concession_amount = excluded.concession_amount,
+          due_date = excluded.due_date,
+          updated_at = datetime('now')
+        """,
+        (student_id, concession, due_date),
+    )
+    info_after = _student_financials(conn, student_id)
+    conn.commit()
+    conn.close()
+    _log_activity(user, "fee_policy_updated", f"Updated fee policy for {student_id}", {
+        "student_id": student_id,
+        "concession_amount": concession,
+        "due_date": due_date,
+    })
+    return {
+        "status": "ok",
+        "student_id": student_id,
+        "concession_amount": info_after["concession_amount"],
+        "due_date": info_after["due_date"],
+        "total": info_after["total"],
+        "due": info_after["due"],
+    }
+
+
+@app.post("/fees/admin/reset-unpaid")
+def fees_admin_reset_unpaid(request: Request):
+    user = _get_current_user(request)
+    _require_superuser(user)
+    _ensure_fee_policies_table()
+    conn = get_connection()
+    students = conn.execute("SELECT student_id, course FROM students ORDER BY student_id ASC").fetchall()
+    existing = conn.execute(
+        "SELECT student_id, COALESCE(MAX(amount_total),0) AS max_total FROM fees GROUP BY student_id"
+    ).fetchall()
+    existing_by_sid = {str(r["student_id"]): float(r["max_total"] or 0) for r in existing}
+    policies = conn.execute("SELECT student_id, concession_amount, due_date FROM fee_policies").fetchall()
+    policy_by_sid = {str(r["student_id"]): dict(r) for r in policies}
+
+    conn.execute("DELETE FROM fees")
+
+    inserted = 0
+    for row in students:
+        sid = str(row["student_id"])
+        planned = _course_fee_inr(row["course"])
+        base_total = float(planned if planned is not None else existing_by_sid.get(sid, 0.0))
+        policy = policy_by_sid.get(sid) or {}
+        concession = min(max(float(policy.get("concession_amount", 0) or 0), 0.0), max(base_total, 0.0))
+        effective_total = max(base_total - concession, 0.0)
+        due_date = policy.get("due_date")
+        conn.execute(
+            """
+            INSERT INTO fees (student_id, amount_total, amount_paid, due_date, remarks)
+            VALUES (?, ?, 0, ?, ?)
+            """,
+            (sid, effective_total, due_date, "Fee reset to unpaid by staff"),
+        )
+        inserted += 1
+    conn.commit()
+    conn.close()
+    _log_activity(user, "fees_reset_unpaid", f"Reset fees to 100% unpaid for {inserted} students", {
+        "students_count": inserted,
+    })
+    return {"status": "ok", "message": f"Reset to unpaid for {inserted} students", "students_count": inserted}
 
 
 @app.get("/fees/{fee_id}/invoice")
@@ -1639,21 +1852,21 @@ def fees_summary(request: Request):
             "due": info["due"],
             "transactions": info["transactions"],
             "course": info["student"]["course"],
+            "concession_amount": info["concession_amount"],
+            "due_date": info["due_date"],
             "gst_percent": 18,
         }
-    else:
-        row = conn.execute(
-            """
-            SELECT
-              COALESCE(SUM(amount_total), 0) AS total,
-              COALESCE(SUM(amount_paid), 0) AS paid,
-              COUNT(*) AS transactions
-            FROM fees
-            """
-        ).fetchone()
+    students = conn.execute("SELECT student_id FROM students").fetchall()
+    total = 0.0
+    paid = 0.0
+    for s in students:
+        info = _student_financials(conn, s["student_id"])
+        if not info:
+            continue
+        total += float(info["total"])
+        paid += float(info["paid"])
+    row = conn.execute("SELECT COUNT(*) AS transactions FROM fees").fetchone()
     conn.close()
-    total = float(row["total"])
-    paid = float(row["paid"])
     return {
         "total": total,
         "paid": paid,
@@ -1814,7 +2027,6 @@ def list_timetable(request: Request, course: str = "", batch: str = ""):
 def create_timetable(entry: TimetableEntryRequest, request: Request):
     user = _get_current_user(request)
     _require_superuser(user)
-    conn = get_connection()
     cur = conn.execute(
         """
         INSERT INTO timetable
@@ -2103,11 +2315,15 @@ def reports_summary(request: Request):
     _require_superuser(_get_current_user(request))
     conn = get_connection()
     student_count = conn.execute("SELECT COUNT(*) AS c FROM students").fetchone()["c"]
-    fee_totals = conn.execute("""
-        SELECT COALESCE(SUM(amount_total), 0) AS total,
-               COALESCE(SUM(amount_paid), 0) AS paid
-        FROM fees
-    """).fetchone()
+    student_rows = conn.execute("SELECT student_id FROM students").fetchall()
+    fees_total = 0.0
+    fees_paid = 0.0
+    for row in student_rows:
+        info = _student_financials(conn, row["student_id"])
+        if not info:
+            continue
+        fees_total += float(info["total"])
+        fees_paid += float(info["paid"])
     attendance_counts = conn.execute("""
         SELECT
             COALESCE(SUM(CASE WHEN attendance_status = 'Present' THEN 1 ELSE 0 END), 0) AS present,
@@ -2117,9 +2333,9 @@ def reports_summary(request: Request):
     conn.close()
     return {
         "students": student_count,
-        "fees_total": fee_totals["total"],
-        "fees_paid": fee_totals["paid"],
-        "fees_balance": float(fee_totals["total"]) - float(fee_totals["paid"]),
+        "fees_total": fees_total,
+        "fees_paid": fees_paid,
+        "fees_balance": fees_total - fees_paid,
         "attendance_present": attendance_counts["present"],
         "attendance_absent": attendance_counts["absent"],
     }

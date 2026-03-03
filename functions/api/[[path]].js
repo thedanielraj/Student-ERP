@@ -41,6 +41,8 @@ export async function onRequest(context) {
     }
 
     const session = await requireAuth(request, env);
+    if (path === "auth/change-password" && method === "POST") return authChangePassword(request, session, env);
+    if (path === "admin/users/password" && method === "POST") return adminSetUserPassword(request, session, env);
 
     if (path === "activity/logs" && method === "GET") return activityLogs(session, env);
     if (path === "activity/undo" && method === "POST") return activityUndo(request, session, env);
@@ -73,6 +75,9 @@ export async function onRequest(context) {
     if (path === "fees/recent" && method === "GET") return feesRecent(session, env);
     if (path === "fees/summary" && method === "GET") return feesSummary(session, env);
     if (path === "fees/record" && method === "POST") return feesRecord(request, session, env);
+    if (path === "fees/admin/policies" && method === "GET") return feesPoliciesList(session, env);
+    if (path === "fees/admin/policy" && method === "POST") return feesPolicyUpsert(request, session, env);
+    if (path === "fees/admin/reset-unpaid" && method === "POST") return feesResetUnpaid(session, env);
     if (/^fees\/\d+\/invoice$/.test(path) && method === "GET") {
       const feeId = Number(path.split("/")[1]);
       return feeInvoice(feeId, session, env);
@@ -151,7 +156,7 @@ function httpError(status, message) {
 }
 
 function isSuperuser(session) {
-  return session.user_id === "superuser";
+  return session?.role === "superuser" || session?.role === "staff" || session?.user_id === "superuser";
 }
 
 function ensureSelfOrSuperuser(session, studentId) {
@@ -169,6 +174,12 @@ function random8Digits() {
 async function ensureCredentials(env) {
   await env.DB.prepare(
     "INSERT OR IGNORE INTO credentials (username, password, role) VALUES ('superuser', 'qwerty', 'superuser')"
+  ).run();
+  await env.DB.prepare(
+    "INSERT OR IGNORE INTO credentials (username, password, role) VALUES ('praharsh', '9121726565', 'staff')"
+  ).run();
+  await env.DB.prepare(
+    "INSERT OR IGNORE INTO credentials (username, password, role) VALUES ('nanda', '8124326444', 'staff')"
   ).run();
   const students = await env.DB.prepare("SELECT student_id FROM students").all();
   for (const row of students.results || []) {
@@ -211,10 +222,13 @@ async function requireAuth(request, env) {
     "SELECT token, user_id, expires_at FROM sessions WHERE token = ?"
   ).bind(token).first();
   if (!row || row.expires_at <= now) throw httpError(401, "Session expired");
+  const cred = await env.DB.prepare(
+    "SELECT role FROM credentials WHERE username = ?"
+  ).bind(String(row.user_id || "")).first();
   const timeout = Number(env.SESSION_TIMEOUT_SECONDS || "300");
   await env.DB.prepare("UPDATE sessions SET expires_at = ? WHERE token = ?")
     .bind(now + timeout, token).run();
-  return { token, user_id: row.user_id };
+  return { token, user_id: row.user_id, role: String(cred?.role || "") };
 }
 
 async function handleLogin(request, env) {
@@ -223,7 +237,7 @@ async function handleLogin(request, env) {
   const username = String(body.username || "").trim();
   const password = String(body.password || "").trim();
   const cred = await env.DB.prepare(
-    "SELECT username FROM credentials WHERE username = ? AND password = ?"
+    "SELECT username, role FROM credentials WHERE username = ? AND password = ?"
   ).bind(username, password).first();
   if (!cred) throw httpError(401, "Invalid credentials");
   const token = crypto.randomUUID().replace(/-/g, "");
@@ -236,7 +250,17 @@ async function handleLogin(request, env) {
 }
 
 async function authMe(userId, env) {
-  if (userId === "superuser") return { status: "ok", user: "superuser", role: "superuser" };
+  const cred = await env.DB.prepare(
+    "SELECT role FROM credentials WHERE username = ?"
+  ).bind(String(userId || "")).first();
+  const role = String(cred?.role || "");
+  if (role === "superuser" || role === "staff" || userId === "superuser") {
+    const display = String(userId || "").toLowerCase();
+    let welcome = "";
+    if (display === "praharsh") welcome = "Welcome Praharsh Sir!";
+    else if (display === "nanda") welcome = "Welcome Nanda Sir!";
+    return { status: "ok", user: String(userId || ""), role: "superuser", welcome_message: welcome };
+  }
   const s = await env.DB.prepare(
     "SELECT student_name, course, batch FROM students WHERE student_id = ?"
   ).bind(userId).first();
@@ -249,6 +273,39 @@ async function authMe(userId, env) {
     course: s?.course || "",
     batch: s?.batch || "",
   };
+}
+
+async function authChangePassword(request, session, env) {
+  await ensureCredentials(env);
+  const b = await request.json();
+  const currentPassword = String(b.current_password || "").trim();
+  const newPassword = String(b.new_password || "").trim();
+  if (!currentPassword || !newPassword) throw httpError(400, "current_password and new_password are required");
+  if (newPassword.length < 6) throw httpError(400, "New password must be at least 6 characters");
+  const cred = await env.DB.prepare(
+    "SELECT username FROM credentials WHERE username = ? AND password = ?"
+  ).bind(session.user_id, currentPassword).first();
+  if (!cred) throw httpError(400, "Current password is incorrect");
+  await env.DB.prepare("UPDATE credentials SET password = ? WHERE username = ?")
+    .bind(newPassword, session.user_id).run();
+  await writeActivity(env, session, "password_changed", `Password changed for ${session.user_id}`, { username: session.user_id });
+  return json({ status: "ok", message: "Password updated" });
+}
+
+async function adminSetUserPassword(request, session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  await ensureCredentials(env);
+  const b = await request.json();
+  const username = String(b.username || "").trim();
+  const newPassword = String(b.new_password || "").trim();
+  if (!username || !newPassword) throw httpError(400, "username and new_password are required");
+  if (newPassword.length < 6) throw httpError(400, "New password must be at least 6 characters");
+  const existing = await env.DB.prepare("SELECT username FROM credentials WHERE username = ?").bind(username).first();
+  if (!existing) throw httpError(404, "User not found");
+  await env.DB.prepare("UPDATE credentials SET password = ? WHERE username = ?")
+    .bind(newPassword, username).run();
+  await writeActivity(env, session, "password_reset", `Password reset for ${username}`, { username });
+  return json({ status: "ok", message: "User password updated" });
 }
 
 async function publicStudentIds(env) {
@@ -601,6 +658,7 @@ async function admissionsDelete(admissionId, session, env) {
 }
 
 async function studentFinancials(env, studentId) {
+  await ensureFeePoliciesTable(env);
   const student = await env.DB.prepare(
     "SELECT student_id, student_name, course, batch FROM students WHERE student_id = ?"
   ).bind(studentId).first();
@@ -608,11 +666,36 @@ async function studentFinancials(env, studentId) {
   const fee = await env.DB.prepare(
     "SELECT COALESCE(SUM(amount_paid),0) AS paid, COALESCE(MAX(amount_total),0) AS max_total, COUNT(*) AS transactions FROM fees WHERE student_id = ?"
   ).bind(studentId).first();
+  const policy = await env.DB.prepare(
+    "SELECT concession_amount, due_date FROM fee_policies WHERE student_id = ?"
+  ).bind(studentId).first();
   const planned = COURSE_FEES_INR[String(student.course || "").toLowerCase()];
-  const total = Number(planned ?? fee.max_total ?? 0);
+  const baseTotal = Number(planned ?? fee.max_total ?? 0);
+  const concessionAmount = Math.min(Math.max(Number(policy?.concession_amount || 0), 0), Math.max(baseTotal, 0));
+  const total = Math.max(baseTotal - concessionAmount, 0);
   const paid = Number(fee.paid || 0);
   const due = Math.max(total - paid, 0);
-  return { student, total, paid, due, transactions: Number(fee.transactions || 0) };
+  return {
+    student,
+    base_total: baseTotal,
+    concession_amount: concessionAmount,
+    due_date: policy?.due_date || null,
+    total,
+    paid,
+    due,
+    transactions: Number(fee.transactions || 0),
+  };
+}
+
+async function ensureFeePoliciesTable(env) {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS fee_policies (
+      student_id TEXT PRIMARY KEY,
+      concession_amount REAL NOT NULL DEFAULT 0,
+      due_date TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`
+  ).run();
 }
 
 async function ensureTestsTables(env) {
@@ -1070,6 +1153,8 @@ async function studentBalance(studentId, session, env) {
     total: info.total,
     paid: info.paid,
     balance: info.due,
+    concession_amount: info.concession_amount,
+    due_date: info.due_date,
     gst_percent: 18,
   });
 }
@@ -1342,19 +1427,26 @@ async function attendanceSyncUpload(request, session, env) {
 async function feesRecent(session, env) {
   let rows;
   if (isSuperuser(session)) {
-    rows = await env.DB.prepare("SELECT fee_id, student_id, amount_total, amount_paid, due_date, remarks FROM fees ORDER BY fee_id DESC LIMIT 20").all();
+    rows = await env.DB.prepare("SELECT fee_id, student_id, amount_total, amount_paid, due_date, remarks, created_at FROM fees ORDER BY fee_id DESC LIMIT 20").all();
   } else {
-    rows = await env.DB.prepare("SELECT fee_id, student_id, amount_total, amount_paid, due_date, remarks FROM fees WHERE student_id = ? ORDER BY fee_id DESC LIMIT 20").bind(session.user_id).all();
+    rows = await env.DB.prepare("SELECT fee_id, student_id, amount_total, amount_paid, due_date, remarks, created_at FROM fees WHERE student_id = ? ORDER BY fee_id DESC LIMIT 20").bind(session.user_id).all();
   }
   return json(rows.results || []);
 }
 
 async function feesSummary(session, env) {
   if (isSuperuser(session)) {
-    const row = await env.DB.prepare("SELECT COALESCE(SUM(amount_total),0) AS total, COALESCE(SUM(amount_paid),0) AS paid, COUNT(*) AS transactions FROM fees").first();
-    const total = Number(row.total || 0);
-    const paid = Number(row.paid || 0);
-    return json({ total, paid, due: total - paid, transactions: Number(row.transactions || 0) });
+    const students = await env.DB.prepare("SELECT student_id FROM students").all();
+    let total = 0;
+    let paid = 0;
+    for (const row of students.results || []) {
+      const info = await studentFinancials(env, String(row.student_id || ""));
+      if (!info) continue;
+      total += Number(info.total || 0);
+      paid += Number(info.paid || 0);
+    }
+    const txRow = await env.DB.prepare("SELECT COUNT(*) AS transactions FROM fees").first();
+    return json({ total, paid, due: total - paid, transactions: Number(txRow.transactions || 0) });
   }
   const info = await studentFinancials(env, session.user_id);
   if (!info) return json({ total: 0, paid: 0, due: 0, transactions: 0 });
@@ -1364,6 +1456,8 @@ async function feesSummary(session, env) {
     due: info.due,
     transactions: info.transactions,
     course: info.student.course,
+    concession_amount: info.concession_amount,
+    due_date: info.due_date,
     gst_percent: 18,
   });
 }
@@ -1373,7 +1467,9 @@ async function feesRecord(request, session, env) {
   const form = await request.formData();
   const studentId = String(form.get("student_id") || "");
   const amountPaid = Number(form.get("amount_paid") || 0);
-  const amountTotal = Number(form.get("amount_total") || amountPaid);
+  const info = await studentFinancials(env, studentId);
+  if (!info) throw httpError(404, "Student not found");
+  const amountTotal = Number(form.get("amount_total") || info.total || amountPaid);
   const dueDate = String(form.get("due_date") || "");
   const remarks = String(form.get("remarks") || "");
   if (!studentId || amountPaid <= 0) throw httpError(400, "Invalid fee payload");
@@ -1401,13 +1497,107 @@ async function feesRecord(request, session, env) {
   return json({ status: "ok", message: "Fee recorded" });
 }
 
+async function feesPoliciesList(session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  await ensureFeePoliciesTable(env);
+  const rows = await env.DB.prepare(
+    "SELECT student_id, concession_amount, due_date, updated_at FROM fee_policies ORDER BY student_id ASC"
+  ).all();
+  return json(rows.results || []);
+}
+
+async function feesPolicyUpsert(request, session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  await ensureFeePoliciesTable(env);
+  const b = await request.json();
+  const studentId = String(b.student_id || "").trim();
+  if (!studentId) throw httpError(400, "student_id is required");
+  const infoBefore = await studentFinancials(env, studentId);
+  if (!infoBefore) throw httpError(404, "Student not found");
+  let concessionAmount = Math.max(Number(b.concession_amount || 0), 0);
+  concessionAmount = Math.min(concessionAmount, Math.max(Number(infoBefore.base_total || 0), 0));
+  let dueDate = String(b.due_date || "").trim();
+  if (dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) throw httpError(400, "due_date must be YYYY-MM-DD");
+  if (!dueDate) dueDate = null;
+  await env.DB.prepare(
+    `INSERT INTO fee_policies (student_id, concession_amount, due_date, updated_at)
+     VALUES (?, ?, ?, datetime('now'))
+     ON CONFLICT(student_id) DO UPDATE SET
+       concession_amount = excluded.concession_amount,
+       due_date = excluded.due_date,
+       updated_at = datetime('now')`
+  ).bind(studentId, concessionAmount, dueDate).run();
+  const infoAfter = await studentFinancials(env, studentId);
+  await writeActivity(
+    env,
+    session,
+    "fee_policy_updated",
+    `Updated fee policy for ${studentId}`,
+    { student_id: studentId, concession_amount: concessionAmount, due_date: dueDate }
+  );
+  return json({
+    status: "ok",
+    student_id: studentId,
+    concession_amount: infoAfter?.concession_amount || 0,
+    due_date: infoAfter?.due_date || null,
+    total: infoAfter?.total || 0,
+    due: infoAfter?.due || 0,
+  });
+}
+
+async function feesResetUnpaid(session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  await ensureFeePoliciesTable(env);
+  const students = await env.DB.prepare("SELECT student_id, course FROM students ORDER BY student_id ASC").all();
+  const feeMax = await env.DB.prepare(
+    "SELECT student_id, COALESCE(MAX(amount_total),0) AS max_total FROM fees GROUP BY student_id"
+  ).all();
+  const maxByStudent = new Map((feeMax.results || []).map((r) => [String(r.student_id), Number(r.max_total || 0)]));
+  const policies = await env.DB.prepare(
+    "SELECT student_id, concession_amount, due_date FROM fee_policies"
+  ).all();
+  const policyByStudent = new Map((policies.results || []).map((r) => [String(r.student_id), r]));
+
+  await env.DB.prepare("DELETE FROM fees").run();
+
+  let inserted = 0;
+  for (const s of students.results || []) {
+    const sid = String(s.student_id || "");
+    const planned = COURSE_FEES_INR[String(s.course || "").toLowerCase()];
+    const baseTotal = Number(planned ?? maxByStudent.get(sid) ?? 0);
+    const policy = policyByStudent.get(sid);
+    const concession = Math.min(Math.max(Number(policy?.concession_amount || 0), 0), Math.max(baseTotal, 0));
+    const effectiveTotal = Math.max(baseTotal - concession, 0);
+    const dueDate = policy?.due_date || null;
+    await env.DB.prepare(
+      "INSERT INTO fees (student_id, amount_total, amount_paid, due_date, remarks) VALUES (?, ?, 0, ?, ?)"
+    ).bind(sid, effectiveTotal, dueDate, "Fee reset to unpaid by staff").run();
+    inserted += 1;
+  }
+
+  await writeActivity(
+    env,
+    session,
+    "fees_reset_unpaid",
+    `Reset fees to 100% unpaid for ${inserted} students`,
+    { students_count: inserted }
+  );
+  return json({ status: "ok", message: `Reset to unpaid for ${inserted} students`, students_count: inserted });
+}
+
 async function reportsSummary(session, env) {
   if (!isSuperuser(session)) throw httpError(403, "Forbidden");
   const students = await env.DB.prepare("SELECT COUNT(*) AS c FROM students").first();
-  const fees = await env.DB.prepare("SELECT COALESCE(SUM(amount_total),0) AS total, COALESCE(SUM(amount_paid),0) AS paid FROM fees").first();
+  const allStudents = await env.DB.prepare("SELECT student_id FROM students").all();
+  let total = 0;
+  let paid = 0;
+  for (const row of allStudents.results || []) {
+    const info = await studentFinancials(env, String(row.student_id || ""));
+    if (!info) continue;
+    total += Number(info.total || 0);
+    paid += Number(info.paid || 0);
+  }
   const attendance = await env.DB.prepare("SELECT COALESCE(SUM(CASE WHEN lower(attendance_status) IN ('present','p') THEN 1 ELSE 0 END),0) AS present, COALESCE(SUM(CASE WHEN lower(attendance_status) IN ('absent','a') THEN 1 ELSE 0 END),0) AS absent FROM attendance").first();
-  const total = Number(fees.total || 0);
-  const paid = Number(fees.paid || 0);
   return json({
     students: Number(students.c || 0),
     fees_total: total,

@@ -14,6 +14,7 @@ let selectedId = null;
 let authInfo = null;
 let studentFeeSummary = null;
 let razorpayKeyId = null;
+let feePoliciesByStudent = {};
 let portalMode = "student";
 let alumniSelectedIds = new Set();
 let selectedStudentIds = new Set();
@@ -421,10 +422,10 @@ async function openPortal(mode) {
   error?.classList.add("hidden");
   if (portalMode === "staff") {
     if (title) title.textContent = "Staff Portal";
-    if (subtitle) subtitle.textContent = "Only superuser access is enabled.";
+    if (subtitle) subtitle.textContent = "Staff access enabled for superuser and staff users.";
     if (user) {
-      user.placeholder = "superuser";
-      user.value = "superuser";
+      user.placeholder = "staff username";
+      user.value = "";
       user.removeAttribute("list");
     }
   } else {
@@ -719,6 +720,7 @@ function switchSection(target) {
     renderBackAttendance();
   }
   if (target === "fees") {
+    loadFeePolicies();
     renderFeesEntryList();
     loadFeeSummary();
   }
@@ -868,11 +870,12 @@ function renderFeesEntryList() {
   body.innerHTML = "";
 
   if (!allStudents.length) {
-    body.innerHTML = `<tr><td colspan="7" class="empty">No students found</td></tr>`;
+    body.innerHTML = `<tr><td colspan="9" class="empty">No students found</td></tr>`;
     return;
   }
 
   allStudents.forEach(s => {
+    const policy = feePoliciesByStudent[String(s.student_id)] || {};
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${s.student_name} (ID: ${s.student_id})</td>
@@ -881,7 +884,12 @@ function renderFeesEntryList() {
       <td><input class="fee-input" id="fee-paid-${s.student_id}" type="number" min="0" step="0.01" placeholder="Paid" /></td>
       <td><input id="fee-receipt-${s.student_id}" type="file" /></td>
       <td><input class="fee-input" id="fee-remarks-${s.student_id}" placeholder="Remarks" /></td>
-      <td><button class="btn" onclick="recordFee('${s.student_id}')">Record</button></td>
+      <td><input class="fee-input" id="fee-concession-${s.student_id}" type="number" min="0" step="0.01" placeholder="Concession" value="${Number(policy.concession_amount || 0)}" /></td>
+      <td><input id="fee-deadline-${s.student_id}" type="date" value="${policy.due_date || ""}" /></td>
+      <td>
+        <button class="btn" onclick="recordFee('${s.student_id}')">Record</button>
+        <button class="btn" onclick="saveFeePolicy('${s.student_id}')">Save Policy</button>
+      </td>
     `;
     body.appendChild(tr);
   });
@@ -925,6 +933,98 @@ async function recordFee(studentId) {
   remarksEl.value = "";
   receiptEl.value = "";
   alert("Fee recorded.");
+}
+
+async function saveFeePolicy(studentId) {
+  const concessionEl = document.getElementById(`fee-concession-${studentId}`);
+  const deadlineEl = document.getElementById(`fee-deadline-${studentId}`);
+  const concession = Math.max(Number(concessionEl?.value || 0), 0);
+  const dueDate = String(deadlineEl?.value || "").trim();
+
+  const res = await authFetch(`${API}/fees/admin/policy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      student_id: String(studentId),
+      concession_amount: concession,
+      due_date: dueDate || null,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "Failed to update fee policy.");
+    return;
+  }
+  const data = await res.json().catch(() => ({}));
+  feePoliciesByStudent[String(studentId)] = {
+    concession_amount: Number(data.concession_amount || concession),
+    due_date: data.due_date || dueDate || "",
+  };
+  await Promise.all([loadFeeSummary(), loadStudentFeeSummary()]);
+  alert("Fee concession/deadline updated.");
+}
+
+async function resetFeesToUnpaid() {
+  if (!confirm("This will reset all students to 100% unpaid and clear paid history. Continue?")) return;
+  const res = await authFetch(`${API}/fees/admin/reset-unpaid`, { method: "POST" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "Failed to reset fees.");
+    return;
+  }
+  const data = await res.json().catch(() => ({}));
+  await Promise.all([loadRecentFees(), loadFeeSummary(), loadStudents(), loadFeePolicies()]);
+  renderFeesEntryList();
+  alert(data.message || "Fees reset to unpaid.");
+}
+
+async function changeOwnPassword() {
+  const currentEl = document.getElementById("currentPasswordInput");
+  const nextEl = document.getElementById("newPasswordInput");
+  const currentPassword = String(currentEl?.value || "").trim();
+  const newPassword = String(nextEl?.value || "").trim();
+  if (!currentPassword || !newPassword) {
+    alert("Enter current and new password.");
+    return;
+  }
+  const res = await authFetch(`${API}/auth/change-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "Failed to change password.");
+    return;
+  }
+  if (currentEl) currentEl.value = "";
+  if (nextEl) nextEl.value = "";
+  alert("Password updated.");
+}
+
+async function adminSetUserPassword() {
+  if (!authInfo || authInfo.role !== "superuser") return;
+  const userEl = document.getElementById("adminPasswordUsername");
+  const passEl = document.getElementById("adminPasswordNew");
+  const username = String(userEl?.value || "").trim();
+  const newPassword = String(passEl?.value || "").trim();
+  if (!username || !newPassword) {
+    alert("Enter username and new password.");
+    return;
+  }
+  const res = await authFetch(`${API}/admin/users/password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, new_password: newPassword }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "Failed to set user password.");
+    return;
+  }
+  if (userEl) userEl.value = "";
+  if (passEl) passEl.value = "";
+  alert("User password updated.");
 }
 
 async function loadReports() {
@@ -1209,6 +1309,24 @@ async function loadAdmissions() {
     }
     body.appendChild(tr);
   });
+}
+
+async function loadFeePolicies() {
+  if (!authInfo || authInfo.role === "student") return;
+  const res = await authFetch(`${API}/fees/admin/policies`);
+  if (!res.ok) return;
+  const rows = await res.json().catch(() => []);
+  const map = {};
+  (rows || []).forEach((r) => {
+    const sid = String(r.student_id || "");
+    if (!sid) return;
+    map[sid] = {
+      concession_amount: Number(r.concession_amount || 0),
+      due_date: r.due_date || "",
+    };
+  });
+  feePoliciesByStudent = map;
+  renderFeesEntryList();
 }
 
 async function openAdmissionPdf(admissionId) {
@@ -1957,6 +2075,7 @@ function afterLoginInit() {
   loadTests();
   loadFeeSummary();
   if (authInfo && authInfo.role === "superuser") {
+    loadFeePolicies();
     loadRecentFees();
     loadReports();
   } else {
@@ -1978,12 +2097,6 @@ async function handleLogin() {
 
   if (!user || !pass) {
     error.textContent = "Enter username and password.";
-    error.classList.remove("hidden");
-    return;
-  }
-
-  if (portalMode === "staff" && user.toLowerCase() !== "superuser") {
-    error.textContent = "Only superuser can use staff portal right now.";
     error.classList.remove("hidden");
     return;
   }
@@ -2059,12 +2172,21 @@ function applyRoleUI() {
 
   const welcomePanel = document.getElementById("studentWelcomePanel");
   const welcomeTitle = document.getElementById("studentWelcomeTitle");
-  if (isStudent && welcomePanel) {
-    const name = authInfo.first_name || authInfo.user || "Student";
-    welcomeTitle.textContent = `Hello ${name}`;
-    welcomePanel.classList.remove("hidden");
-  } else if (welcomePanel) {
-    welcomePanel.classList.add("hidden");
+  if (welcomePanel && welcomeTitle) {
+    const username = String(authInfo?.user || "").toLowerCase();
+    if (username === "praharsh") {
+      welcomeTitle.textContent = "Welcome Praharsh Sir!";
+      welcomePanel.classList.remove("hidden");
+    } else if (username === "nanda") {
+      welcomeTitle.textContent = "Welcome Nanda Sir!";
+      welcomePanel.classList.remove("hidden");
+    } else if (isStudent) {
+      const name = authInfo.first_name || authInfo.user || "Student";
+      welcomeTitle.textContent = `Hello ${name}`;
+      welcomePanel.classList.remove("hidden");
+    } else {
+      welcomePanel.classList.add("hidden");
+    }
   }
 
   const takePanel = document.getElementById("takeAttendancePanel");
@@ -2098,6 +2220,8 @@ function applyRoleUI() {
   if (adminTestsListPanel) adminTestsListPanel.classList.toggle("hidden", isStudent);
   const studentTestsPanel = document.getElementById("studentTestsPanel");
   if (studentTestsPanel) studentTestsPanel.classList.toggle("hidden", !isStudent);
+  const adminPasswordPanel = document.getElementById("adminPasswordPanel");
+  if (adminPasswordPanel) adminPasswordPanel.classList.toggle("hidden", isStudent);
 
   const feesTitle = document.getElementById("feesTitle");
   const feesSubtitle = document.getElementById("feesSubtitle");
@@ -2133,6 +2257,12 @@ async function loadStudentFeeSummary() {
   setText("studentFeeCourse", data.course || "-");
   setText("studentFeeTotal", formatMoney(data.total));
   setText("studentFeePaid", formatMoney(data.paid));
+  setText("studentFeeConcession", formatMoney(data.concession_amount || 0));
+  setText("studentFeeDeadline", data.due_date ? formatDateDDMMYYYY(data.due_date) : "-");
+  const installmentEl = document.getElementById("studentInstallmentAmount");
+  if (installmentEl && !installmentEl.value) {
+    installmentEl.value = remaining > 0 ? String(Number(remaining.toFixed(2))) : "";
+  }
 
   const gatewayRes = await authFetch(`${API}/payments/gateway-status`);
   if (gatewayRes.ok) {
@@ -2153,7 +2283,8 @@ async function loadStudentFeeSummary() {
 
 async function payNowRazorpay() {
   if (!authInfo || authInfo.role !== "student") return;
-  if (!studentFeeSummary || Number(studentFeeSummary.balance || 0) <= 0) {
+  const dueAmount = Number(studentFeeSummary?.balance || 0);
+  if (!studentFeeSummary || dueAmount <= 0) {
     alert("No due amount to pay.");
     return;
   }
@@ -2161,11 +2292,22 @@ async function payNowRazorpay() {
     alert("Razorpay is not available right now.");
     return;
   }
+  const installmentEl = document.getElementById("studentInstallmentAmount");
+  const requestedInstallment = Number(installmentEl?.value || 0);
+  const amountToPay = requestedInstallment > 0 ? requestedInstallment : dueAmount;
+  if (amountToPay <= 0) {
+    alert("Enter installment amount.");
+    return;
+  }
+  if (amountToPay > dueAmount) {
+    alert("Installment amount cannot be more than remaining balance.");
+    return;
+  }
 
   const orderRes = await authFetch(`${API}/payments/razorpay/order`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ student_id: authInfo.user })
+    body: JSON.stringify({ student_id: authInfo.user, amount_inr: amountToPay })
   });
   if (!orderRes.ok) {
     const err = await orderRes.json().catch(() => ({}));
@@ -2208,6 +2350,8 @@ async function payNowRazorpay() {
         await downloadInvoicePdf(verifyData.invoice);
       }
       alert("Payment successful and recorded.");
+      const installmentInput = document.getElementById("studentInstallmentAmount");
+      if (installmentInput) installmentInput.value = "";
       await loadStudentFeeSummary();
       await loadFeeSummary();
       await loadRecentFees();
