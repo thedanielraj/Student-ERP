@@ -464,8 +464,13 @@ function toggleSidebar(scope) {
 }
 
 function showAdmissionForm() {
-  document.getElementById("homeAdmission")?.classList.remove("hidden");
-  document.getElementById("homeWelcome")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const admission = document.getElementById("homeAdmission");
+  const welcome = document.getElementById("homeWelcome");
+  admission?.classList.remove("hidden");
+  if (admission && welcome && welcome.parentElement === admission.parentElement && welcome.nextElementSibling !== admission) {
+    welcome.insertAdjacentElement("afterend", admission);
+  }
+  admission?.scrollIntoView({ behavior: "smooth", block: "start" });
   const rows = document.querySelectorAll(".academic-row");
   if (!rows.length) {
     addAcademicRow();
@@ -2172,20 +2177,27 @@ function applyRoleUI() {
 
   const welcomePanel = document.getElementById("studentWelcomePanel");
   const welcomeTitle = document.getElementById("studentWelcomeTitle");
+  const staffWelcomePanel = document.getElementById("staffWelcomePanel");
+  const staffWelcomeTitle = document.getElementById("staffWelcomeTitle");
   if (welcomePanel && welcomeTitle) {
-    const username = String(authInfo?.user || "").toLowerCase();
-    if (username === "praharsh") {
-      welcomeTitle.textContent = "Welcome Praharsh Sir!";
-      welcomePanel.classList.remove("hidden");
-    } else if (username === "nanda") {
-      welcomeTitle.textContent = "Welcome Nanda Sir!";
-      welcomePanel.classList.remove("hidden");
-    } else if (isStudent) {
+    if (isStudent) {
       const name = authInfo.first_name || authInfo.user || "Student";
       welcomeTitle.textContent = `Hello ${name}`;
       welcomePanel.classList.remove("hidden");
     } else {
       welcomePanel.classList.add("hidden");
+    }
+  }
+  if (staffWelcomePanel && staffWelcomeTitle) {
+    const username = String(authInfo?.user || "").toLowerCase();
+    if (!isStudent && username === "praharsh") {
+      staffWelcomeTitle.textContent = "Welcome Praharsh Sir!";
+      staffWelcomePanel.classList.remove("hidden");
+    } else if (!isStudent && username === "nanda") {
+      staffWelcomeTitle.textContent = "Welcome Nanda Sir!";
+      staffWelcomePanel.classList.remove("hidden");
+    } else {
+      staffWelcomePanel.classList.add("hidden");
     }
   }
 
