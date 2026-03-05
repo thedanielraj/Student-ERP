@@ -88,6 +88,10 @@ export async function onRequest(context) {
       const id = Number(path.split("/")[1]);
       return testDetail(id, session, env);
     }
+    if (/^tests\/\d+\/attempts$/.test(path) && method === "GET") {
+      const id = Number(path.split("/")[1]);
+      return testAttemptsByTest(id, session, env);
+    }
     if (/^tests\/\d+\/start$/.test(path) && method === "POST") {
       const id = Number(path.split("/")[1]);
       return testStart(id, session, env);
@@ -745,7 +749,9 @@ async function ensureTestsTables(env) {
       score REAL NOT NULL DEFAULT 0,
       total_points REAL NOT NULL DEFAULT 0,
       malpractice_count INTEGER NOT NULL DEFAULT 0,
-      malpractice_flag INTEGER NOT NULL DEFAULT 0
+      malpractice_flag INTEGER NOT NULL DEFAULT 0,
+      question_order_json TEXT NOT NULL DEFAULT '[]',
+      option_order_json TEXT NOT NULL DEFAULT '{}'
     )`
   ).run();
   await env.DB.prepare(
@@ -767,6 +773,55 @@ async function ensureTestsTables(env) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`
   ).run();
+  const attemptCols = await env.DB.prepare("PRAGMA table_info(test_attempts)").all();
+  const attemptExisting = new Set((attemptCols.results || []).map((c) => c.name));
+  if (!attemptExisting.has("question_order_json")) {
+    await env.DB.prepare("ALTER TABLE test_attempts ADD COLUMN question_order_json TEXT NOT NULL DEFAULT '[]'").run();
+  }
+  if (!attemptExisting.has("option_order_json")) {
+    await env.DB.prepare("ALTER TABLE test_attempts ADD COLUMN option_order_json TEXT NOT NULL DEFAULT '{}'").run();
+  }
+}
+
+function shuffleArray(items) {
+  const arr = [...items];
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
+  }
+  return arr;
+}
+
+function buildAttemptQuestionPayload(questions, qOrder, oOrder, includeCorrect = false) {
+  const byId = new Map();
+  questions.forEach((q) => byId.set(Number(q.question_id), q));
+  const orderedIds = Array.isArray(qOrder) && qOrder.length
+    ? qOrder.map((x) => Number(x)).filter((x) => byId.has(x))
+    : Array.from(byId.keys());
+  return orderedIds.map((qid, idx) => {
+    const q = byId.get(qid);
+    const optionOrder = Array.isArray(oOrder?.[String(qid)]) && oOrder[String(qid)].length
+      ? oOrder[String(qid)]
+      : ["A", "B", "C", "D"];
+    const optionText = {
+      A: String(q.option_a || ""),
+      B: String(q.option_b || ""),
+      C: String(q.option_c || ""),
+      D: String(q.option_d || ""),
+    };
+    const options = optionOrder
+      .filter((k) => ["A", "B", "C", "D"].includes(String(k)))
+      .map((k) => ({ key: String(k), text: optionText[String(k)] }));
+    return {
+      question_id: qid,
+      question_order: idx + 1,
+      question_text: q.question_text,
+      options,
+      correct_answer: includeCorrect ? q.correct_answer : undefined,
+    };
+  });
 }
 
 async function testsCreate(request, session, env) {
@@ -875,16 +930,11 @@ async function testDetail(testId, session, env) {
     `SELECT question_id, question_order, question_text, option_a, option_b, option_c, option_d, correct_answer
      FROM test_questions WHERE test_id = ? ORDER BY question_order ASC`
   ).bind(testId).all();
-  const questions = (qRows.results || []).map((q) => ({
-    question_id: q.question_id,
-    question_order: q.question_order,
-    question_text: q.question_text,
-    option_a: q.option_a,
-    option_b: q.option_b,
-    option_c: q.option_c,
-    option_d: q.option_d,
-    correct_answer: isSuperuser(session) ? q.correct_answer : undefined,
-  }));
+  const rows = qRows.results || [];
+  const qOrder = rows.map((q) => Number(q.question_id));
+  const oOrder = {};
+  qOrder.forEach((qid) => { oOrder[String(qid)] = ["A", "B", "C", "D"]; });
+  const questions = buildAttemptQuestionPayload(rows, qOrder, oOrder, isSuperuser(session));
   return json({ ...test, questions });
 }
 
@@ -892,7 +942,7 @@ async function testStart(testId, session, env) {
   if (isSuperuser(session)) throw httpError(403, "Staff cannot take tests");
   await ensureTestsTables(env);
   const test = await env.DB.prepare(
-    "SELECT test_id, duration_minutes FROM tests WHERE test_id = ? AND is_active = 1"
+    "SELECT test_id, title, duration_minutes FROM tests WHERE test_id = ? AND is_active = 1"
   ).bind(testId).first();
   if (!test) throw httpError(404, "Test not found");
   const assigned = await env.DB.prepare(
@@ -902,7 +952,7 @@ async function testStart(testId, session, env) {
   ).bind(testId, testId, session.user_id).first();
   if (!assigned) throw httpError(403, "Forbidden");
   let attempt = await env.DB.prepare(
-    `SELECT attempt_id, start_time, status
+    `SELECT attempt_id, start_time, status, question_order_json, option_order_json
      FROM test_attempts WHERE test_id = ? AND student_id = ? AND status = 'in_progress'
      ORDER BY attempt_id DESC LIMIT 1`
   ).bind(testId, session.user_id).first();
@@ -911,7 +961,7 @@ async function testStart(testId, session, env) {
       "INSERT INTO test_attempts (test_id, student_id, status) VALUES (?, ?, 'in_progress')"
     ).bind(testId, session.user_id).run();
     attempt = await env.DB.prepare(
-      "SELECT attempt_id, start_time, status FROM test_attempts WHERE attempt_id = ?"
+      "SELECT attempt_id, start_time, status, question_order_json, option_order_json FROM test_attempts WHERE attempt_id = ?"
     ).bind(Number(ins.meta?.last_row_id || 0)).first();
     await writeActivity(
       env,
@@ -921,6 +971,30 @@ async function testStart(testId, session, env) {
       { test_id: testId, attempt_id: attempt?.attempt_id || 0, student_id: session.user_id }
     );
   }
+  const qRows = await env.DB.prepare(
+    `SELECT question_id, question_order, question_text, option_a, option_b, option_c, option_d, correct_answer
+     FROM test_questions WHERE test_id = ? ORDER BY question_order ASC`
+  ).bind(testId).all();
+  const questions = qRows.results || [];
+  let qOrder = [];
+  let oOrder = {};
+  try { qOrder = JSON.parse(String(attempt.question_order_json || "[]")); } catch (_) { qOrder = []; }
+  try { oOrder = JSON.parse(String(attempt.option_order_json || "{}")); } catch (_) { oOrder = {}; }
+  if (!Array.isArray(qOrder) || !qOrder.length) {
+    qOrder = shuffleArray(questions.map((q) => Number(q.question_id)));
+  }
+  const qSet = new Set(questions.map((q) => Number(q.question_id)));
+  const normalizedQOrder = qOrder.map((x) => Number(x)).filter((x) => qSet.has(x));
+  questions.forEach((q) => {
+    const qid = Number(q.question_id);
+    if (!normalizedQOrder.includes(qid)) normalizedQOrder.push(qid);
+    const existing = Array.isArray(oOrder[String(qid)]) ? oOrder[String(qid)] : [];
+    const cleanExisting = existing.map((k) => String(k)).filter((k) => ["A", "B", "C", "D"].includes(k));
+    oOrder[String(qid)] = cleanExisting.length === 4 ? cleanExisting : shuffleArray(["A", "B", "C", "D"]);
+  });
+  await env.DB.prepare(
+    "UPDATE test_attempts SET question_order_json = ?, option_order_json = ? WHERE attempt_id = ?"
+  ).bind(JSON.stringify(normalizedQOrder), JSON.stringify(oOrder), attempt.attempt_id).run();
   const ansRows = await env.DB.prepare(
     "SELECT question_id, answer_text FROM test_attempt_answers WHERE attempt_id = ?"
   ).bind(attempt.attempt_id).all();
@@ -930,12 +1004,15 @@ async function testStart(testId, session, env) {
   });
   const startEpoch = Math.floor(new Date(`${String(attempt.start_time).replace(" ", "T")}Z`).getTime() / 1000);
   const endsAtEpoch = startEpoch + Number(test.duration_minutes || 30) * 60;
+  const questionPayload = buildAttemptQuestionPayload(questions, normalizedQOrder, oOrder, false);
   return json({
     attempt_id: attempt.attempt_id,
     test_id: testId,
+    title: test.title || "Test",
     status: attempt.status,
     ends_at_epoch: endsAtEpoch,
     answers,
+    questions: questionPayload,
   });
 }
 
@@ -989,10 +1066,11 @@ async function testMalpractice(attemptId, request, session, env) {
   if (isSuperuser(session)) throw httpError(403, "Forbidden");
   await ensureTestsTables(env);
   const attempt = await env.DB.prepare(
-    "SELECT attempt_id, student_id, malpractice_count FROM test_attempts WHERE attempt_id = ?"
+    "SELECT attempt_id, student_id, malpractice_count, status FROM test_attempts WHERE attempt_id = ?"
   ).bind(attemptId).first();
   if (!attempt) throw httpError(404, "Attempt not found");
   if (attempt.student_id !== session.user_id) throw httpError(403, "Forbidden");
+  if (attempt.status === "submitted") return json({ status: "ok", malpractice_count: Number(attempt.malpractice_count || 0), flagged: true });
   const body = await request.json();
   const eventType = String(body.event_type || "").trim() || "unknown";
   const details = String(body.details || "").trim();
@@ -1011,6 +1089,51 @@ async function testMalpractice(attemptId, request, session, env) {
     { attempt_id: attemptId, event_type: eventType, details, student_id: session.user_id, count: newCount }
   );
   return json({ status: "ok", malpractice_count: newCount, flagged: true });
+}
+
+async function testAttemptsByTest(testId, session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  await ensureTestsTables(env);
+  const attempts = await env.DB.prepare(
+    `SELECT
+      attempt_id,
+      test_id,
+      student_id,
+      start_time,
+      submitted_at,
+      status,
+      score,
+      total_points,
+      malpractice_count,
+      malpractice_flag
+     FROM test_attempts
+     WHERE test_id = ?
+     ORDER BY attempt_id DESC`
+  ).bind(testId).all();
+  const rows = attempts.results || [];
+  const out = [];
+  for (const row of rows) {
+    const events = await env.DB.prepare(
+      `SELECT event_id, event_type, details, created_at
+       FROM test_malpractice_events
+       WHERE attempt_id = ?
+       ORDER BY event_id ASC`
+    ).bind(row.attempt_id).all();
+    out.push({
+      attempt_id: row.attempt_id,
+      test_id: row.test_id,
+      student_id: row.student_id,
+      start_time: row.start_time,
+      submitted_at: row.submitted_at,
+      status: row.status,
+      score: Number(row.score || 0),
+      total_points: Number(row.total_points || 0),
+      malpractice_count: Number(row.malpractice_count || 0),
+      malpractice_flag: Number(row.malpractice_flag || 0) === 1,
+      malpractice_events: events.results || [],
+    });
+  }
+  return json(out);
 }
 
 async function listStudents(session, env) {

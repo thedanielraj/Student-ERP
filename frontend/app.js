@@ -24,6 +24,7 @@ let announcementsNotifierBootstrapped = false;
 let currentAttempt = null;
 let currentAttemptQuestions = [];
 let currentAttemptTimer = null;
+let malpracticeAutoSubmitted = false;
 
 function buildBatchOptions() {
   const options = [];
@@ -447,6 +448,7 @@ function showHome() {
   endAttemptProtection();
   currentAttempt = null;
   currentAttemptQuestions = [];
+  malpracticeAutoSubmitted = false;
   localStorage.removeItem(TOKEN_KEY);
   document.getElementById("homeRoot")?.classList.remove("hidden");
   document.getElementById("loginRoot")?.classList.add("hidden");
@@ -1453,7 +1455,9 @@ async function loadTests() {
     if (!body) return;
     body.innerHTML = "";
     if (!data.length) {
-      body.innerHTML = `<tr><td colspan="6" class="empty">No tests created</td></tr>`;
+      body.innerHTML = `<tr><td colspan="7" class="empty">No tests created</td></tr>`;
+      const attemptsBody = document.getElementById("testAttemptsBody");
+      if (attemptsBody) attemptsBody.innerHTML = `<tr><td colspan="6" class="empty">No attempts to review</td></tr>`;
       return;
     }
     data.forEach((t) => {
@@ -1465,9 +1469,14 @@ async function loadTests() {
         <td>${t.assignment_count || 0}</td>
         <td>${t.attempt_count || 0}</td>
         <td>${t.malpractice_count || 0}</td>
+        <td><button class="btn" data-review-test-id="${t.test_id}">Review</button></td>
       `;
+      tr.querySelector('[data-review-test-id]')?.addEventListener("click", async (e) => {
+        await loadTestAttempts(Number(e.target.dataset.reviewTestId || 0), t.title || "");
+      });
       body.appendChild(tr);
     });
+    await loadTestAttempts(Number(data[0].test_id || 0), data[0].title || "");
     return;
   }
   const body = document.getElementById("studentTestsBody");
@@ -1498,20 +1507,17 @@ async function loadTests() {
 }
 
 async function startTestAttempt(testId) {
-  const [testRes, startRes] = await Promise.all([
-    authFetch(`${API}/tests/${testId}`),
-    authFetch(`${API}/tests/${testId}/start`, { method: "POST" }),
-  ]);
-  if (!testRes.ok || !startRes.ok) {
-    const err = await (startRes.ok ? testRes : startRes).json().catch(() => ({}));
+  const startRes = await authFetch(`${API}/tests/${testId}/start`, { method: "POST" });
+  if (!startRes.ok) {
+    const err = await startRes.json().catch(() => ({}));
     alert(err.detail || "Unable to start test.");
     return;
   }
-  const test = await testRes.json();
   const attempt = await startRes.json();
+  malpracticeAutoSubmitted = false;
   currentAttempt = attempt;
-  currentAttemptQuestions = Array.isArray(test.questions) ? test.questions : [];
-  document.getElementById("attemptTestTitle").textContent = test.title || "Test Attempt";
+  currentAttemptQuestions = Array.isArray(attempt.questions) ? attempt.questions : [];
+  document.getElementById("attemptTestTitle").textContent = attempt.title || "Test Attempt";
   renderAttemptQuestions(currentAttemptQuestions, attempt.answers || {});
   document.getElementById("testAttemptPanel")?.classList.remove("hidden");
   enableAttemptProtection();
@@ -1524,14 +1530,22 @@ function renderAttemptQuestions(questions, existingAnswers) {
   container.innerHTML = "";
   questions.forEach((q, index) => {
     const val = String((existingAnswers || {})[q.question_id] || "");
+    const options = Array.isArray(q.options) && q.options.length
+      ? q.options
+      : [
+          { key: "A", text: q.option_a || "" },
+          { key: "B", text: q.option_b || "" },
+          { key: "C", text: q.option_c || "" },
+          { key: "D", text: q.option_d || "" },
+        ];
     const div = document.createElement("div");
     div.className = "attempt-question attempt-protected";
+    const optionsHtml = options
+      .map((opt) => `<label><input type="radio" name="attempt-q-${q.question_id}" value="${escapeHtml(opt.key)}" ${val === opt.key ? "checked" : ""}/> ${escapeHtml(opt.text || "")}</label><br/>`)
+      .join("");
     div.innerHTML = `
       <div><strong>Q${index + 1}. ${escapeHtml(q.question_text || "")}</strong></div>
-      <label><input type="radio" name="attempt-q-${q.question_id}" value="A" ${val === "A" ? "checked" : ""}/> ${escapeHtml(q.option_a || "")}</label><br/>
-      <label><input type="radio" name="attempt-q-${q.question_id}" value="B" ${val === "B" ? "checked" : ""}/> ${escapeHtml(q.option_b || "")}</label><br/>
-      <label><input type="radio" name="attempt-q-${q.question_id}" value="C" ${val === "C" ? "checked" : ""}/> ${escapeHtml(q.option_c || "")}</label><br/>
-      <label><input type="radio" name="attempt-q-${q.question_id}" value="D" ${val === "D" ? "checked" : ""}/> ${escapeHtml(q.option_d || "")}</label>
+      ${optionsHtml}
     `;
     container.appendChild(div);
   });
@@ -1565,6 +1579,7 @@ async function submitCurrentAttempt() {
   endAttemptProtection();
   currentAttempt = null;
   currentAttemptQuestions = [];
+  malpracticeAutoSubmitted = false;
   document.getElementById("testAttemptPanel")?.classList.add("hidden");
   await loadTests();
 }
@@ -1593,11 +1608,18 @@ function startAttemptTimer() {
 
 async function reportMalpractice(eventType, details) {
   if (!currentAttempt || !currentAttempt.attempt_id) return;
-  await authFetch(`${API}/tests/attempts/${currentAttempt.attempt_id}/malpractice`, {
+  const res = await authFetch(`${API}/tests/attempts/${currentAttempt.attempt_id}/malpractice`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ event_type: eventType, details }),
   });
+  if (!res.ok) return;
+  const data = await res.json().catch(() => ({}));
+  if (!malpracticeAutoSubmitted && Number(data.malpractice_count || 0) >= 1) {
+    malpracticeAutoSubmitted = true;
+    alert("Malpractice recorded. Test will be auto-submitted.");
+    await submitCurrentAttempt();
+  }
 }
 
 function enableAttemptProtection() {
@@ -1778,6 +1800,45 @@ function renderSimpleList(id, items, emptyText) {
 
 function value(id) {
   return (document.getElementById(id)?.value || "").trim();
+}
+
+async function loadTestAttempts(testId, testTitle) {
+  const body = document.getElementById("testAttemptsBody");
+  const title = document.getElementById("testReviewTitle");
+  if (!body) return;
+  if (!testId) {
+    body.innerHTML = `<tr><td colspan="6" class="empty">No attempts to review</td></tr>`;
+    if (title) title.textContent = "Select a test";
+    return;
+  }
+  const res = await authFetch(`${API}/tests/${testId}/attempts`);
+  if (!res.ok) {
+    body.innerHTML = `<tr><td colspan="6" class="empty">Failed to load attempts</td></tr>`;
+    return;
+  }
+  const rows = await res.json();
+  if (title) title.textContent = `${testTitle || "Test"} (#${testId})`;
+  body.innerHTML = "";
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="6" class="empty">No attempts to review</td></tr>`;
+    return;
+  }
+  rows.forEach((a) => {
+    const events = Array.isArray(a.malpractice_events) ? a.malpractice_events : [];
+    const timeline = events.length
+      ? events.map((e) => `${formatDateTime(e.created_at)} - ${e.event_type}${e.details ? ` (${e.details})` : ""}`).join(" | ")
+      : "-";
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>#${a.attempt_id}</td>
+      <td>${escapeHtml(a.student_id || "-")}</td>
+      <td>${escapeHtml(a.status || "-")}</td>
+      <td>${Number(a.score || 0)}/${Number(a.total_points || 0)}</td>
+      <td>${Number(a.malpractice_count || 0)} ${a.malpractice_flag ? "(Flagged)" : ""}</td>
+      <td>${escapeHtml(timeline)}</td>
+    `;
+    body.appendChild(tr);
+  });
 }
 
 function escapeHtml(value) {
@@ -2140,6 +2201,7 @@ function logout() {
   endAttemptProtection();
   currentAttempt = null;
   currentAttemptQuestions = [];
+  malpracticeAutoSubmitted = false;
   localStorage.removeItem(TOKEN_KEY);
   showHome();
 }
@@ -2230,6 +2292,8 @@ function applyRoleUI() {
   if (adminTestsPanel) adminTestsPanel.classList.toggle("hidden", isStudent);
   const adminTestsListPanel = document.getElementById("adminTestsListPanel");
   if (adminTestsListPanel) adminTestsListPanel.classList.toggle("hidden", isStudent);
+  const testReviewPanel = document.getElementById("testReviewPanel");
+  if (testReviewPanel) testReviewPanel.classList.toggle("hidden", isStudent);
   const studentTestsPanel = document.getElementById("studentTestsPanel");
   if (studentTestsPanel) studentTestsPanel.classList.toggle("hidden", !isStudent);
   const adminPasswordPanel = document.getElementById("adminPasswordPanel");
