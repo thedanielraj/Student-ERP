@@ -393,6 +393,7 @@ document.getElementById("search")?.addEventListener("input", renderStudentList);
 populateBatchInputs();
 setupTabs();
 setupSidebarNav();
+initSidebarUX();
 loadProudAlumni();
 initAuth();
 
@@ -415,6 +416,7 @@ async function loadStudentPortalLogins() {
 }
 
 async function openPortal(mode) {
+  setSidebarOpen("home", false);
   portalMode = mode === "staff" ? "staff" : "student";
   const title = document.getElementById("portalTitle");
   const subtitle = document.getElementById("portalSubtitle");
@@ -442,6 +444,7 @@ async function openPortal(mode) {
   document.getElementById("homeRoot")?.classList.add("hidden");
   document.getElementById("loginRoot")?.classList.remove("hidden");
   document.getElementById("appRoot")?.classList.add("hidden");
+  user?.focus();
 }
 
 function showHome() {
@@ -453,19 +456,83 @@ function showHome() {
   document.getElementById("homeRoot")?.classList.remove("hidden");
   document.getElementById("loginRoot")?.classList.add("hidden");
   document.getElementById("appRoot")?.classList.add("hidden");
+  setSidebarOpen("home", false);
+  setSidebarOpen("app", false);
   loadProudAlumni();
   stopAnnouncementNotifier();
 }
 
 function toggleSidebar(scope) {
+  const key = scope === "home" ? "homeSidebarOpen" : "appSidebarOpen";
+  const hamburger = document.querySelector(scope === "home" ? ".home-hamburger" : ".app-hamburger");
   if (scope === "home") {
-    document.querySelector(".home-sidebar")?.classList.toggle("open");
+    const sidebar = document.querySelector(".home-sidebar");
+    const isOpen = sidebar?.classList.toggle("open");
+    hamburger?.classList.toggle("open", Boolean(isOpen));
+    hamburger?.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    localStorage.setItem(key, isOpen ? "1" : "0");
     return;
   }
-  document.querySelector(".sidebar")?.classList.toggle("open");
+  const sidebar = document.querySelector(".sidebar");
+  const isOpen = sidebar?.classList.toggle("open");
+  hamburger?.classList.toggle("open", Boolean(isOpen));
+  hamburger?.setAttribute("aria-expanded", isOpen ? "true" : "false");
+  localStorage.setItem(key, isOpen ? "1" : "0");
+}
+
+function setSidebarOpen(scope, open) {
+  const sidebar = document.querySelector(scope === "home" ? ".home-sidebar" : ".sidebar");
+  const hamburger = document.querySelector(scope === "home" ? ".home-hamburger" : ".app-hamburger");
+  if (!sidebar || !hamburger) return;
+  sidebar.classList.toggle("open", open);
+  hamburger.classList.toggle("open", open);
+  hamburger.setAttribute("aria-expanded", open ? "true" : "false");
+  const key = scope === "home" ? "homeSidebarOpen" : "appSidebarOpen";
+  localStorage.setItem(key, open ? "1" : "0");
+}
+
+function initSidebarUX() {
+  setSidebarOpen("home", localStorage.getItem("homeSidebarOpen") === "1");
+  setSidebarOpen("app", localStorage.getItem("appSidebarOpen") === "1");
+
+  document.addEventListener("click", (e) => {
+    const target = e.target;
+    const homeSidebar = document.querySelector(".home-sidebar");
+    const homeHamburger = document.querySelector(".home-hamburger");
+    if (homeSidebar && homeHamburger && homeSidebar.classList.contains("open")) {
+      if (!homeSidebar.contains(target) && !homeHamburger.contains(target)) {
+        setSidebarOpen("home", false);
+      }
+    }
+    const appSidebar = document.querySelector(".sidebar");
+    const appHamburger = document.querySelector(".app-hamburger");
+    if (appSidebar && appHamburger && appSidebar.classList.contains("open")) {
+      if (!appSidebar.contains(target) && !appHamburger.contains(target)) {
+        setSidebarOpen("app", false);
+      }
+    }
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      setSidebarOpen("home", false);
+      setSidebarOpen("app", false);
+      return;
+    }
+    const activeTag = document.activeElement?.tagName?.toLowerCase();
+    const typing = activeTag === "input" || activeTag === "textarea" || document.activeElement?.isContentEditable;
+    if (e.key === "/" && !typing) {
+      const searchEl = document.getElementById("search");
+      if (searchEl) {
+        e.preventDefault();
+        searchEl.focus();
+      }
+    }
+  });
 }
 
 function showAdmissionForm() {
+  setSidebarOpen("home", false);
   const admission = document.getElementById("homeAdmission");
   const welcome = document.getElementById("homeWelcome");
   admission?.classList.remove("hidden");
@@ -757,6 +824,9 @@ function switchSection(target) {
   }
   if (target === "activity") {
     loadActivityLogs();
+  }
+  if (window.matchMedia && window.matchMedia("(max-width: 1100px)").matches) {
+    setSidebarOpen("app", false);
   }
 }
 

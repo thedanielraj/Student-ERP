@@ -10,7 +10,9 @@
 
 <body>
   <div id="homeRoot" class="home-root">
-    <button class="hamburger home-hamburger" onclick="toggleSidebar('home')" aria-label="Toggle home menu">☰</button>
+    <button class="hamburger home-hamburger" onclick="toggleSidebar('home')" aria-label="Toggle home menu" aria-expanded="false" title="Menu">
+      <span class="bar"></span><span class="bar"></span><span class="bar"></span>
+    </button>
     <aside class="home-sidebar">
       <div class="brand">
         <div class="logo-wrap">
@@ -135,7 +137,9 @@
   </div>
 
   <div id="appRoot" class="app hidden">
-    <button class="hamburger app-hamburger" onclick="toggleSidebar('app')" aria-label="Toggle app menu">☰</button>
+    <button class="hamburger app-hamburger" onclick="toggleSidebar('app')" aria-label="Toggle app menu" aria-expanded="false" title="Menu">
+      <span class="bar"></span><span class="bar"></span><span class="bar"></span>
+    </button>
     <aside class="sidebar">
       <div class="brand">
         <div class="logo-wrap">
