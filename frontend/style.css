@@ -423,6 +423,17 @@ body {
   white-space: nowrap;
 }
 
+.fee-total-label {
+  display: inline-block;
+  font-weight: 600;
+  color: var(--accent-dark);
+  background: var(--chip);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
 .student-actions {
   margin-top: 6px;
   display: flex;

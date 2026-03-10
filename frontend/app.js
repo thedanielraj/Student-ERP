@@ -1132,11 +1132,16 @@ function renderFeesEntryList() {
 
   allStudents.forEach(s => {
     const policy = feePoliciesByStudent[String(s.student_id)] || {};
+    const totalAmount = 150000;
+    const totalDisplay = "INR 1.5L";
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${s.student_name} (ID: ${s.student_id})</td>
       <td>${s.batch}</td>
-      <td><input class="fee-input" id="fee-total-${s.student_id}" type="number" min="0" step="0.01" placeholder="Total" /></td>
+      <td>
+        <span class="fee-total-label">${totalDisplay}</span>
+        <input class="fee-input" id="fee-total-${s.student_id}" type="number" min="0" step="0.01" value="${totalAmount}" hidden />
+      </td>
       <td><input class="fee-input" id="fee-paid-${s.student_id}" type="number" min="0" step="0.01" placeholder="Paid" /></td>
       <td><input id="fee-receipt-${s.student_id}" type="file" /></td>
       <td><input class="fee-input" id="fee-remarks-${s.student_id}" placeholder="Remarks" /></td>
