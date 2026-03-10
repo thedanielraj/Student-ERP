@@ -22,6 +22,7 @@ let announcementPollTimer = null;
 let latestAnnouncementIdSeen = Number(localStorage.getItem("latestAnnouncementIdSeen") || 0);
 let announcementsNotifierBootstrapped = false;
 let admissionsCache = [];
+let chatbotState = { initialized: false, awaitingDetails: true, awaitingMenu: false };
 let currentAttempt = null;
 let currentAttemptQuestions = [];
 let currentAttemptTimer = null;
@@ -401,7 +402,85 @@ setupTabs();
 setupSidebarNav();
 initSidebarUX();
 loadProudAlumni();
+initChatbot();
 initAuth();
+
+function initChatbot() {
+  const messages = document.getElementById("chatbotMessages");
+  if (!messages || chatbotState.initialized) return;
+  chatbotState.initialized = true;
+  addChatbotMessage("bot", "Hello! Welcome to Arunand's Aviation Academy - Bangalore.");
+  addChatbotMessage("bot", "To assist you better, may I know your Name, Age, Qualification and Location?");
+  const input = document.getElementById("chatbotInput");
+  input?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      sendChatbotMessage();
+    }
+  });
+}
+
+function toggleChatbot() {
+  const panel = document.getElementById("chatbotPanel");
+  if (!panel) return;
+  panel.classList.toggle("hidden");
+  if (!panel.classList.contains("hidden")) {
+    initChatbot();
+    document.getElementById("chatbotInput")?.focus();
+  }
+}
+
+function addChatbotMessage(role, text) {
+  const messages = document.getElementById("chatbotMessages");
+  if (!messages) return;
+  const bubble = document.createElement("div");
+  bubble.className = `chatbot-bubble ${role === "user" ? "user" : "bot"}`;
+  bubble.textContent = text;
+  messages.appendChild(bubble);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function sendChatbotMessage() {
+  const input = document.getElementById("chatbotInput");
+  const text = String(input?.value || "").trim();
+  if (!text) return;
+  addChatbotMessage("user", text);
+  if (input) input.value = "";
+
+  if (chatbotState.awaitingDetails) {
+    chatbotState.awaitingDetails = false;
+    chatbotState.awaitingMenu = true;
+    addChatbotMessage("bot", "Hello! Welcome to Arunand's Aviation Academy - Bangalore.\n\nTo assist you better, please reply with the number:\n1. Register your details\n2. Course Details\n3. Fees\n4. Eligibility\n5. Talk to Counsellor\n6. Christmas & New Year Offers");
+    return;
+  }
+
+  if (chatbotState.awaitingMenu) {
+    const choice = text.replace(/[^\d]/g, "");
+    switch (choice) {
+      case "1":
+        addChatbotMessage("bot", "Please share your Name, Age, Qualification, and Location in one message.");
+        break;
+      case "2":
+        addChatbotMessage("bot", "Course Details:\n- Ground Operations\n- Cabin Crew");
+        break;
+      case "3":
+        addChatbotMessage("bot", "Fees: INR 1.5L for the course.");
+        break;
+      case "4":
+        addChatbotMessage("bot", "Eligibility varies by course. Typically, 10+2 pass and good communication skills are required.");
+        break;
+      case "5":
+        addChatbotMessage("bot", "A counsellor will reach out. Please share your phone number and preferred time.");
+        break;
+      case "6":
+        addChatbotMessage("bot", "For current offers, please share your contact details and our team will update you.");
+        break;
+      default:
+        addChatbotMessage("bot", "Please reply with a number from 1 to 6.");
+        break;
+    }
+  }
+}
 
 async function loadStudentPortalLogins() {
   const dataList = document.getElementById("studentLoginList");

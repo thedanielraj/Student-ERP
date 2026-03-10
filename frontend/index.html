@@ -118,6 +118,23 @@
         </div>
       </section>
     </main>
+    <div id="homeChatbot" class="chatbot">
+      <button class="chatbot-toggle" onclick="toggleChatbot()">Chat with us</button>
+      <div id="chatbotPanel" class="chatbot-panel hidden">
+        <div class="chatbot-header">
+          <div>
+            <strong>Arunand's Aviation Academy</strong>
+            <div class="chatbot-sub">Admissions Assistant</div>
+          </div>
+          <button class="chatbot-close" onclick="toggleChatbot()">Close</button>
+        </div>
+        <div id="chatbotMessages" class="chatbot-messages"></div>
+        <div class="chatbot-input">
+          <input id="chatbotInput" placeholder="Type your message..." />
+          <button class="btn primary" onclick="sendChatbotMessage()">Send</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div id="loginRoot" class="login-root hidden">
