@@ -781,7 +781,7 @@ async function generateAdmissionPdfAttachment(payload) {
       borderWidth: 1.2,
     });
     const headerTop = 792;
-    const logoY = headerTop - logoHeight + 4;
+    const logoY = headerTop - logoHeight - 6;
     if (logoImage) {
       page.drawImage(logoImage, {
         x: 42,
@@ -815,13 +815,13 @@ async function generateAdmissionPdfAttachment(payload) {
     const issuedOn = formatDateDDMMYYYY(getTodayIso());
     page.drawText(`Application Date: ${issuedOn}`, {
       x: 42,
-      y: 740,
+      y: 724,
       size: 10,
       font,
       color: muted,
     });
-    const photoX = 452;
-    const photoY = headerTop - 88;
+    const photoX = 440;
+    const photoY = headerTop - 98;
     const photoW = 100;
     const photoH = 120;
     page.drawRectangle({
