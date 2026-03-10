@@ -760,7 +760,7 @@ async function generateAdmissionPdfAttachment(payload) {
     const logoRes = await fetch("/assets/logo.png");
     const logoBytes = await logoRes.arrayBuffer();
     logoImage = await doc.embedPng(logoBytes);
-    const maxW = 120;
+    const maxW = 90;
     const scale = maxW / logoImage.width;
     logoWidth = logoImage.width * scale;
     logoHeight = logoImage.height * scale;
@@ -781,7 +781,7 @@ async function generateAdmissionPdfAttachment(payload) {
       borderWidth: 1.2,
     });
     const headerTop = 792;
-    const logoY = headerTop - logoHeight - 6;
+    const logoY = headerTop - logoHeight - 20;
     if (logoImage) {
       page.drawImage(logoImage, {
         x: 42,
@@ -815,15 +815,15 @@ async function generateAdmissionPdfAttachment(payload) {
     const issuedOn = formatDateDDMMYYYY(getTodayIso());
     page.drawText(`Application Date: ${issuedOn}`, {
       x: 42,
-      y: 724,
+      y: 702,
       size: 10,
       font,
       color: muted,
     });
-    const photoX = 440;
-    const photoY = headerTop - 98;
-    const photoW = 100;
-    const photoH = 120;
+    const photoX = 438;
+    const photoY = 698;
+    const photoW = 102;
+    const photoH = 110;
     page.drawRectangle({
       x: photoX,
       y: photoY,
@@ -840,7 +840,7 @@ async function generateAdmissionPdfAttachment(payload) {
       color: muted,
     });
 
-    let y = 700;
+    let y = 660;
     y = drawSectionTitle(page, "Applicant Details", y);
     y = drawRow(page, "Full Name", `${payload.first_name || ""} ${payload.middle_name || ""} ${payload.last_name || ""}`.trim(), y);
     y = drawRow(page, "Course Applied", payload.course || "-", y);
