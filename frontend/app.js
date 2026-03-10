@@ -21,6 +21,7 @@ let selectedStudentIds = new Set();
 let announcementPollTimer = null;
 let latestAnnouncementIdSeen = Number(localStorage.getItem("latestAnnouncementIdSeen") || 0);
 let announcementsNotifierBootstrapped = false;
+let admissionsCache = [];
 let currentAttempt = null;
 let currentAttemptQuestions = [];
 let currentAttemptTimer = null;
@@ -1532,12 +1533,13 @@ async function loadAdmissions() {
     return;
   }
   const rows = await res.json();
+  admissionsCache = Array.isArray(rows) ? rows : [];
   body.innerHTML = "";
-  if (!rows.length) {
+  if (!admissionsCache.length) {
     body.innerHTML = `<tr><td colspan="8" class="empty">No admissions found</td></tr>`;
     return;
   }
-  rows.forEach((r) => {
+  admissionsCache.forEach((r) => {
     const tr = document.createElement("tr");
     const hasPdf = Boolean(r.pdf_available);
     tr.innerHTML = `
@@ -1564,6 +1566,76 @@ async function loadAdmissions() {
     }
     body.appendChild(tr);
   });
+}
+
+function parseAcademicDetails(raw) {
+  if (Array.isArray(raw)) return raw;
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(String(raw));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function buildAdmissionPayloadFromRow(r) {
+  return {
+    first_name: r.first_name || "",
+    middle_name: r.middle_name || "",
+    last_name: r.last_name || "",
+    phone: r.phone || "",
+    email: r.email || "",
+    blood_group: r.blood_group || "",
+    age: Number(r.age || 0),
+    dob: r.dob || "",
+    aadhaar_number: r.aadhaar_number || "",
+    nationality: r.nationality || "",
+    course: r.course || "",
+    father_name: r.father_name || "",
+    father_phone: r.father_phone || "",
+    father_occupation: r.father_occupation || "",
+    father_email: r.father_email || "",
+    mother_name: r.mother_name || "",
+    mother_phone: r.mother_phone || "",
+    mother_occupation: r.mother_occupation || "",
+    mother_email: r.mother_email || "",
+    correspondence_address: r.correspondence_address || "",
+    permanent_address: r.permanent_address || "",
+    academic_details: parseAcademicDetails(r.academic_details_json),
+  };
+}
+
+async function regenerateAdmissionPdfs() {
+  if (!admissionsCache.length) {
+    alert("No admissions loaded yet. Click Refresh first.");
+    return;
+  }
+  if (!confirm(`Regenerate PDFs for ${admissionsCache.length} admission(s)? This will overwrite stored PDFs.`)) {
+    return;
+  }
+  for (const r of admissionsCache) {
+    const admissionId = Number(r.admission_id || 0);
+    if (!admissionId) continue;
+    const payload = buildAdmissionPayloadFromRow(r);
+    const pdfAttachment = await generateAdmissionPdfAttachment(payload);
+    if (!pdfAttachment) continue;
+    const res = await authFetch(`${API}/admissions/${admissionId}/pdf`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        admission_pdf_base64: pdfAttachment.base64,
+        admission_pdf_filename: pdfAttachment.filename,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert(err.detail || `Failed to update admission #${admissionId}.`);
+      return;
+    }
+  }
+  await loadAdmissions();
+  alert("Admission PDFs regenerated.");
 }
 
 async function loadFeePolicies() {

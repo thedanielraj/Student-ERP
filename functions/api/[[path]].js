@@ -131,6 +131,10 @@ export async function onRequest(context) {
       const id = Number(path.split("/")[1]);
       return await admissionsPdf(id, session, env);
     }
+    if (/^admissions\/\d+\/pdf$/.test(path) && method === "POST") {
+      const id = Number(path.split("/")[1]);
+      return await admissionsPdfReplace(id, request, session, env);
+    }
     if (/^admissions\/\d+$/.test(path) && method === "DELETE") {
       const id = Number(path.split("/")[1]);
       return await admissionsDelete(id, session, env);
@@ -589,9 +593,25 @@ async function admissionsList(session, env) {
       first_name,
       middle_name,
       last_name,
-      course,
       phone,
       email,
+      blood_group,
+      age,
+      dob,
+      aadhaar_number,
+      nationality,
+      father_name,
+      father_phone,
+      father_occupation,
+      father_email,
+      mother_name,
+      mother_phone,
+      mother_occupation,
+      mother_email,
+      correspondence_address,
+      permanent_address,
+      course,
+      academic_details_json,
       created_at,
       admission_pdf_r2_key,
       admission_pdf_bytes
@@ -604,9 +624,28 @@ async function admissionsList(session, env) {
     return {
       admission_id: r.admission_id,
       full_name: fullName,
+      first_name: r.first_name || "",
+      middle_name: r.middle_name || "",
+      last_name: r.last_name || "",
       course: r.course || "",
       phone: r.phone || "",
       email: r.email || "",
+      blood_group: r.blood_group || "",
+      age: Number(r.age || 0),
+      dob: r.dob || "",
+      aadhaar_number: r.aadhaar_number || "",
+      nationality: r.nationality || "",
+      father_name: r.father_name || "",
+      father_phone: r.father_phone || "",
+      father_occupation: r.father_occupation || "",
+      father_email: r.father_email || "",
+      mother_name: r.mother_name || "",
+      mother_phone: r.mother_phone || "",
+      mother_occupation: r.mother_occupation || "",
+      mother_email: r.mother_email || "",
+      correspondence_address: r.correspondence_address || "",
+      permanent_address: r.permanent_address || "",
+      academic_details_json: r.academic_details_json || "[]",
       created_at: r.created_at || "",
       pdf_available: Boolean(r.admission_pdf_r2_key),
       pdf_bytes: Number(r.admission_pdf_bytes || 0),
@@ -640,6 +679,44 @@ async function admissionsPdf(admissionId, session, env) {
       "content-disposition": `inline; filename="${filename}"`,
       "cache-control": "private, max-age=60",
     },
+  });
+}
+
+async function admissionsPdfReplace(admissionId, request, session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  if (!admissionId) throw httpError(400, "Invalid admission id");
+  await ensureAdmissionsTable(env);
+  const row = await env.DB.prepare(
+    "SELECT admission_id, first_name, last_name FROM admissions WHERE admission_id = ?"
+  ).bind(admissionId).first();
+  if (!row) throw httpError(404, "Admission not found");
+  const body = await request.json().catch(() => ({}));
+  const admissionPdfBase64 = String(body.admission_pdf_base64 || "").trim();
+  const admissionPdfFilename = String(body.admission_pdf_filename || "").trim();
+  if (!admissionPdfBase64) throw httpError(400, "Admission PDF payload missing");
+  const maxPdfBytes = 1024 * 1024;
+  let admissionPdfBytes = new Uint8Array(0);
+  try {
+    admissionPdfBytes = decodeBase64ToBytes(admissionPdfBase64);
+  } catch (_) {
+    throw httpError(400, "Invalid admission PDF");
+  }
+  if (admissionPdfBytes.length > maxPdfBytes) {
+    throw httpError(413, "Admission PDF must be less than 1 MB.");
+  }
+  const storedPdf = await uploadAdmissionPdfToR2(env, admissionPdfBytes, admissionPdfFilename);
+  if (!storedPdf.stored) throw httpError(503, "Unable to store admission PDF");
+  await env.DB.prepare(
+    "UPDATE admissions SET admission_pdf_r2_key = ?, admission_pdf_bytes = ? WHERE admission_id = ?"
+  ).bind(storedPdf.key, Number(admissionPdfBytes.length || 0), admissionId).run();
+  const safeFirst = String(row.first_name || "admission").replace(/[^a-zA-Z0-9._-]/g, "_");
+  const safeLast = String(row.last_name || "").replace(/[^a-zA-Z0-9._-]/g, "_");
+  const filename = `${safeFirst}${safeLast ? "_" + safeLast : ""}_${admissionId}.pdf`;
+  return json({
+    status: "ok",
+    admission_id: admissionId,
+    pdf_bytes: Number(admissionPdfBytes.length || 0),
+    filename,
   });
 }
 
