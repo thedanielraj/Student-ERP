@@ -1143,7 +1143,25 @@ async function listStudents(session, env) {
   } else {
     rows = await env.DB.prepare("SELECT * FROM students WHERE student_id = ? ORDER BY student_id DESC").bind(session.user_id).all();
   }
-  return json(rows.results || []);
+  const results = rows.results || [];
+  const withFinancials = [];
+  for (const row of results) {
+    const sid = String(row.student_id || "");
+    const info = sid ? await studentFinancials(env, sid) : null;
+    if (!info) {
+      withFinancials.push(row);
+      continue;
+    }
+    withFinancials.push({
+      ...row,
+      fee_total: info.total,
+      fee_paid: info.paid,
+      fee_due: info.due,
+      fee_concession: info.concession_amount,
+      fee_due_date: info.due_date,
+    });
+  }
+  return json(withFinancials);
 }
 
 async function addStudent(url, session, env) {

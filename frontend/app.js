@@ -103,10 +103,15 @@ function renderStudentList() {
       li.classList.add("active");
     }
     const isChecked = selectedStudentIds.has(String(s.student_id));
+    const dueAmount = Number(s.fee_due);
+    const feeLabel = Number.isFinite(dueAmount) ? `INR ${formatMoney(dueAmount)}` : "INR -";
     li.innerHTML = `
       <div class="student-row-top">
-        <input type="checkbox" class="student-select" data-id="${s.student_id}" ${isChecked ? "checked" : ""} />
-        <div><strong>${s.student_name}</strong></div>
+        <div class="student-row-main">
+          <input type="checkbox" class="student-select" data-id="${s.student_id}" ${isChecked ? "checked" : ""} />
+          <div><strong>${s.student_name}</strong></div>
+        </div>
+        <div class="student-fee-total">Due: ${feeLabel}</div>
       </div>
       <div class="student-meta">ID: ${s.student_id} | ${s.course} | ${s.batch} | ${s.status || "Active"}</div>
       <div class="student-actions">
@@ -374,7 +379,7 @@ function updateSideCounts() {
 
 function formatMoney(value) {
   const number = Number(value || 0);
-  return number.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  return number.toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
 function setupTabs() {
@@ -647,6 +652,7 @@ async function submitAdmissionForm() {
     if (pdfAttachment) {
       payload.admission_pdf_base64 = pdfAttachment.base64;
       payload.admission_pdf_filename = pdfAttachment.filename;
+      triggerPdfDownload(pdfAttachment.bytes, pdfAttachment.filename);
     }
 
     const res = await fetch(`${API}/admissions/apply`, {
@@ -688,50 +694,203 @@ async function submitAdmissionForm() {
   }
 }
 
+function triggerPdfDownload(bytes, filename) {
+  if (!bytes || !bytes.length) return;
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename || "document.pdf";
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
 async function generateAdmissionPdfAttachment(payload) {
   if (!window.PDFLib) return null;
   const MAX_PDF_BYTES = 1024 * 1024;
   const { PDFDocument, StandardFonts, rgb } = window.PDFLib;
   const doc = await PDFDocument.create();
-  const page = doc.addPage([595, 842]);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const accent = rgb(0.06, 0.27, 0.5);
+  const text = rgb(0.1, 0.1, 0.1);
+  const muted = rgb(0.35, 0.4, 0.5);
+  let logoImage = null;
+  let logoWidth = 0;
+  let logoHeight = 0;
 
-  page.drawText("Admission Form Submission", {
-    x: 40, y: 800, size: 18, font: bold, color: rgb(0.06, 0.27, 0.5),
-  });
+  const wrapText = (value, maxWidth, useFont, size) => {
+    const words = String(value || "-").split(/\s+/).filter(Boolean);
+    if (!words.length) return ["-"];
+    const lines = [];
+    let line = "";
+    words.forEach((word) => {
+      const test = line ? `${line} ${word}` : word;
+      const width = useFont.widthOfTextAtSize(test, size);
+      if (width > maxWidth && line) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = test;
+      }
+    });
+    if (line) lines.push(line);
+    return lines;
+  };
 
-  const lines = [
-    `Name: ${payload.first_name} ${payload.middle_name} ${payload.last_name}`.trim(),
-    `Course: ${payload.course}`,
-    `Phone: ${payload.phone}`,
-    `Email: ${payload.email}`,
-    `Blood Group: ${payload.blood_group || "-"}`,
-    `Age: ${payload.age || "-"}`,
-    `DOB: ${payload.dob || "-"}`,
-    `Aadhaar: ${payload.aadhaar_number || "-"}`,
-    `Nationality: ${payload.nationality || "-"}`,
-    `Father: ${payload.father_name || "-"} | ${payload.father_phone || "-"} | ${payload.father_occupation || "-"}`,
-    `Father Email: ${payload.father_email || "-"}`,
-    `Mother: ${payload.mother_name || "-"} | ${payload.mother_phone || "-"} | ${payload.mother_occupation || "-"}`,
-    `Mother Email: ${payload.mother_email || "-"}`,
-    `Correspondence Address: ${payload.correspondence_address || "-"}`,
-    `Permanent Address: ${payload.permanent_address || "-"}`,
-    "Academic Details:",
-  ];
+  const drawSectionTitle = (page, title, y) => {
+    page.drawText(title, { x: 42, y, size: 12, font: bold, color: accent });
+    page.drawLine({ start: { x: 42, y: y - 4 }, end: { x: 553, y: y - 4 }, thickness: 0.8, color: accent });
+    return y - 18;
+  };
 
-  let y = 772;
-  for (const line of lines) {
-    page.drawText(line, { x: 40, y, size: 10, font, color: rgb(0.1, 0.1, 0.1) });
-    y -= 18;
+  const drawRow = (page, label, value, y) => {
+    const labelX = 42;
+    const valueX = 170;
+    const valueWidth = 553 - valueX;
+    const lines = wrapText(value, valueWidth, font, 10);
+    page.drawText(`${label}:`, { x: labelX, y, size: 10, font: bold, color: muted });
+    lines.forEach((line, index) => {
+      page.drawText(line, { x: valueX, y: y - (index * 14), size: 10, font, color: text });
+    });
+    return y - (Math.max(lines.length, 1) * 14) - 6;
+  };
+
+  try {
+    const logoRes = await fetch("/assets/logo.png");
+    const logoBytes = await logoRes.arrayBuffer();
+    logoImage = await doc.embedPng(logoBytes);
+    const maxW = 120;
+    const scale = maxW / logoImage.width;
+    logoWidth = logoImage.width * scale;
+    logoHeight = logoImage.height * scale;
+  } catch (_) {
+    logoImage = null;
+    logoWidth = 0;
+    logoHeight = 0;
   }
 
-  for (const item of payload.academic_details || []) {
-    const text = `- ${item.qualification || "-"} | ${item.year_of_passing || "-"} | ${item.institution || "-"} | ${item.percentage || "-"}%`;
-    if (y < 40) break;
-    page.drawText(text, { x: 55, y, size: 10, font, color: rgb(0.1, 0.1, 0.1) });
-    y -= 16;
-  }
+  const drawAdmissionFormPage = (copyLabel) => {
+    const page = doc.addPage([595, 842]);
+    page.drawRectangle({
+      x: 30,
+      y: 30,
+      width: 535,
+      height: 782,
+      borderColor: accent,
+      borderWidth: 1.2,
+    });
+    if (logoImage) {
+      page.drawImage(logoImage, {
+        x: 42,
+        y: 760,
+        width: logoWidth,
+        height: logoHeight,
+      });
+    }
+    const headerX = 42 + (logoWidth ? logoWidth + 16 : 0);
+    page.drawText("Admission Form", {
+      x: headerX,
+      y: 792,
+      size: 20,
+      font: bold,
+      color: accent,
+    });
+    page.drawText(copyLabel, {
+      x: headerX,
+      y: 772,
+      size: 11,
+      font,
+      color: muted,
+    });
+    const issuedOn = formatDateDDMMYYYY(getTodayIso());
+    page.drawText(`Application Date: ${issuedOn}`, {
+      x: 42,
+      y: 740,
+      size: 10,
+      font,
+      color: muted,
+    });
+    page.drawRectangle({
+      x: 470,
+      y: 730,
+      width: 90,
+      height: 110,
+      borderColor: muted,
+      borderWidth: 0.8,
+    });
+    page.drawText("Photo", { x: 496, y: 782, size: 9, font, color: muted });
+
+    let y = 710;
+    y = drawSectionTitle(page, "Applicant Details", y);
+    y = drawRow(page, "Full Name", `${payload.first_name || ""} ${payload.middle_name || ""} ${payload.last_name || ""}`.trim(), y);
+    y = drawRow(page, "Course Applied", payload.course || "-", y);
+    y = drawRow(page, "Phone", payload.phone || "-", y);
+    y = drawRow(page, "Email", payload.email || "-", y);
+    y = drawRow(page, "Date of Birth", payload.dob ? formatDateDDMMYYYY(payload.dob) : "-", y);
+    y = drawRow(page, "Age", payload.age || "-", y);
+    y = drawRow(page, "Blood Group", payload.blood_group || "-", y);
+    y = drawRow(page, "Aadhaar", payload.aadhaar_number || "-", y);
+    y = drawRow(page, "Nationality", payload.nationality || "-", y);
+
+    y -= 6;
+    y = drawSectionTitle(page, "Parent / Guardian Details", y);
+    y = drawRow(page, "Father", `${payload.father_name || "-"} | ${payload.father_phone || "-"} | ${payload.father_occupation || "-"}`, y);
+    y = drawRow(page, "Father Email", payload.father_email || "-", y);
+    y = drawRow(page, "Mother", `${payload.mother_name || "-"} | ${payload.mother_phone || "-"} | ${payload.mother_occupation || "-"}`, y);
+    y = drawRow(page, "Mother Email", payload.mother_email || "-", y);
+
+    y -= 6;
+    y = drawSectionTitle(page, "Address Details", y);
+    y = drawRow(page, "Correspondence", payload.correspondence_address || "-", y);
+    y = drawRow(page, "Permanent", payload.permanent_address || "-", y);
+
+    y -= 6;
+    y = drawSectionTitle(page, "Academic Details", y);
+    const tableX = 42;
+    const tableW = 511;
+    const colWidths = [150, 70, 210, 70];
+    const headerY = y;
+    page.drawRectangle({ x: tableX, y: headerY - 18, width: tableW, height: 18, borderColor: accent, borderWidth: 0.8 });
+    page.drawText("Qualification", { x: tableX + 6, y: headerY - 14, size: 9, font: bold, color: accent });
+    page.drawText("Year", { x: tableX + colWidths[0] + 6, y: headerY - 14, size: 9, font: bold, color: accent });
+    page.drawText("Institution", { x: tableX + colWidths[0] + colWidths[1] + 6, y: headerY - 14, size: 9, font: bold, color: accent });
+    page.drawText("%", { x: tableX + colWidths[0] + colWidths[1] + colWidths[2] + 6, y: headerY - 14, size: 9, font: bold, color: accent });
+
+    let rowY = headerY - 18;
+    const rows = Array.isArray(payload.academic_details) ? payload.academic_details : [];
+    const maxRows = Math.min(rows.length, 5);
+    for (let i = 0; i < maxRows; i += 1) {
+      const item = rows[i] || {};
+      rowY -= 20;
+      page.drawRectangle({ x: tableX, y: rowY, width: tableW, height: 20, borderColor: rgb(0.82, 0.85, 0.9), borderWidth: 0.6 });
+      page.drawText(String(item.qualification || "-"), { x: tableX + 6, y: rowY + 6, size: 9, font, color: text });
+      page.drawText(String(item.year_of_passing || "-"), { x: tableX + colWidths[0] + 6, y: rowY + 6, size: 9, font, color: text });
+      page.drawText(String(item.institution || "-"), { x: tableX + colWidths[0] + colWidths[1] + 6, y: rowY + 6, size: 9, font, color: text });
+      page.drawText(String(item.percentage || "-"), { x: tableX + colWidths[0] + colWidths[1] + colWidths[2] + 6, y: rowY + 6, size: 9, font, color: text });
+    }
+    if (!maxRows) {
+      rowY -= 20;
+      page.drawRectangle({ x: tableX, y: rowY, width: tableW, height: 20, borderColor: rgb(0.82, 0.85, 0.9), borderWidth: 0.6 });
+      page.drawText("No academic details provided.", { x: tableX + 6, y: rowY + 6, size: 9, font, color: muted });
+    }
+
+    y = rowY - 26;
+    page.drawText("Declaration: I hereby confirm that the above information is true and correct to the best of my knowledge.", {
+      x: 42,
+      y,
+      size: 9,
+      font,
+      color: muted,
+    });
+    y -= 26;
+    page.drawText("Applicant Signature", { x: 42, y, size: 9, font: bold, color: muted });
+    page.drawLine({ start: { x: 42, y: y - 4 }, end: { x: 220, y: y - 4 }, thickness: 0.6, color: muted });
+    page.drawText("Parent/Guardian Signature", { x: 300, y, size: 9, font: bold, color: muted });
+    page.drawLine({ start: { x: 300, y: y - 4 }, end: { x: 553, y: y - 4 }, thickness: 0.6, color: muted });
+  };
+
+  drawAdmissionFormPage("Student Copy");
+  drawAdmissionFormPage("Office Copy");
 
   const bytes = await doc.save();
   if (bytes.length > MAX_PDF_BYTES) {
@@ -744,7 +903,7 @@ async function generateAdmissionPdfAttachment(payload) {
   }
   const base64 = btoa(binary);
   const filename = `admission_${payload.first_name}_${payload.last_name}_${Date.now()}.pdf`.replace(/\s+/g, "_");
-  return { base64, filename };
+  return { base64, filename, bytes };
 }
 
 function addAcademicRow() {
@@ -1442,17 +1601,22 @@ function addTestQuestionRow(data = {}) {
       <strong>Question</strong>
       <button type="button" class="btn" onclick="this.closest('.test-question-row').remove()">Remove</button>
     </div>
-    <div class="form-row">
-      <input class="test-question-text" placeholder="Question text" value="${escapeHtml(data.question_text || "")}" />
+    <div class="test-question-main">
+      <textarea class="test-question-text" placeholder="Question text">${escapeHtml(data.question_text || "")}</textarea>
+    </div>
+    <div class="test-options-grid">
       <input class="test-option-a" placeholder="Option A" value="${escapeHtml(data.option_a || "")}" />
       <input class="test-option-b" placeholder="Option B" value="${escapeHtml(data.option_b || "")}" />
       <input class="test-option-c" placeholder="Option C" value="${escapeHtml(data.option_c || "")}" />
       <input class="test-option-d" placeholder="Option D" value="${escapeHtml(data.option_d || "")}" />
+    </div>
+    <div class="test-correct-row">
+      <label class="hint">Correct option</label>
       <select class="test-correct">
-        <option value="A" ${(data.correct_answer || "") === "A" ? "selected" : ""}>Correct: A</option>
-        <option value="B" ${(data.correct_answer || "") === "B" ? "selected" : ""}>Correct: B</option>
-        <option value="C" ${(data.correct_answer || "") === "C" ? "selected" : ""}>Correct: C</option>
-        <option value="D" ${(data.correct_answer || "") === "D" ? "selected" : ""}>Correct: D</option>
+        <option value="A" ${(data.correct_answer || "") === "A" ? "selected" : ""}>A</option>
+        <option value="B" ${(data.correct_answer || "") === "B" ? "selected" : ""}>B</option>
+        <option value="C" ${(data.correct_answer || "") === "C" ? "selected" : ""}>C</option>
+        <option value="D" ${(data.correct_answer || "") === "D" ? "selected" : ""}>D</option>
       </select>
     </div>
   `;
@@ -2513,77 +2677,108 @@ async function downloadInvoicePdf(invoice) {
   if (!window.PDFLib) return;
   const { PDFDocument, rgb, StandardFonts } = window.PDFLib;
   const pdfDoc = await PDFDocument.create();
-  const page = pdfDoc.addPage([595, 842]);
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-
-  page.drawRectangle({
-    x: 30,
-    y: 30,
-    width: 535,
-    height: 782,
-    borderColor: rgb(0.06, 0.27, 0.5),
-    borderWidth: 1.2,
-  });
+  const accent = rgb(0.06, 0.27, 0.5);
+  const muted = rgb(0.15, 0.2, 0.3);
+  const dim = rgb(0.3, 0.35, 0.45);
+  let logoImage = null;
+  let logoWidth = 0;
+  let logoHeight = 0;
 
   try {
     const logoRes = await fetch("/assets/logo.png");
     const logoBytes = await logoRes.arrayBuffer();
-    const logo = await pdfDoc.embedPng(logoBytes);
+    logoImage = await pdfDoc.embedPng(logoBytes);
     const maxW = 150;
-    const scale = maxW / logo.width;
-    page.drawImage(logo, {
-      x: 42,
-      y: 730,
-      width: logo.width * scale,
-      height: logo.height * scale,
-    });
+    const scale = maxW / logoImage.width;
+    logoWidth = logoImage.width * scale;
+    logoHeight = logoImage.height * scale;
   } catch (_) {
-    // If logo is unavailable, invoice still downloads.
+    logoImage = null;
+    logoWidth = 0;
+    logoHeight = 0;
   }
 
-  page.drawText("Fee Payment Invoice", {
-    x: 42,
-    y: 700,
-    size: 20,
-    font: fontBold,
-    color: rgb(0.06, 0.27, 0.5),
-  });
+  const drawReceiptPage = (copyLabel) => {
+    const page = pdfDoc.addPage([595, 842]);
+    page.drawRectangle({
+      x: 30,
+      y: 30,
+      width: 535,
+      height: 782,
+      borderColor: accent,
+      borderWidth: 1.2,
+    });
 
-  const lines = [
-    ["Invoice No", invoice.invoice_no || "-"],
-    ["Date", formatDateDDMMYYYY(invoice.date || "")],
-    ["Student ID", invoice.student_id || "-"],
-    ["Student Name", invoice.student_name || "-"],
-    ["Course", invoice.course || "-"],
-    ["Payment ID", invoice.payment_id || "-"],
-    ["Order ID", invoice.order_id || "-"],
-    ["Amount Paid", `INR ${formatMoney(invoice.amount_paid || 0)}`],
-    ["Total Fee", `INR ${formatMoney(invoice.amount_total || 0)}`],
-    ["Remaining", `INR ${formatMoney(invoice.balance_due || 0)}`],
-  ];
+    if (logoImage) {
+      page.drawImage(logoImage, {
+        x: 42,
+        y: 730,
+        width: logoWidth,
+        height: logoHeight,
+      });
+    }
 
-  let y = 650;
-  for (const [k, v] of lines) {
-    page.drawText(`${k}:`, { x: 42, y, size: 12, font: fontBold, color: rgb(0.15, 0.2, 0.3) });
-    page.drawText(String(v), { x: 180, y, size: 12, font, color: rgb(0.08, 0.08, 0.08) });
-    y -= 28;
-  }
+    const headerX = 42 + (logoWidth ? logoWidth + 16 : 0);
+    page.drawText("Fee Payment Receipt", {
+      x: headerX,
+      y: 710,
+      size: 20,
+      font: fontBold,
+      color: accent,
+    });
+    page.drawText(copyLabel, {
+      x: headerX,
+      y: 690,
+      size: 11,
+      font,
+      color: muted,
+    });
 
-  page.drawText("Arunand's Aviation Institute", {
-    x: 42,
-    y: 80,
-    size: 11,
-    font: fontBold,
-    color: rgb(0.06, 0.27, 0.5),
-  });
-  page.drawText("Thank you for your payment.", {
-    x: 42,
-    y: 62,
-    size: 10,
-    font,
-    color: rgb(0.3, 0.35, 0.45),
-  });
+    const lines = [
+      ["Receipt No", invoice.invoice_no || "-"],
+      ["Date", formatDateDDMMYYYY(invoice.date || "")],
+      ["Student ID", invoice.student_id || "-"],
+      ["Student Name", invoice.student_name || "-"],
+      ["Course", invoice.course || "-"],
+      ["Payment ID", invoice.payment_id || "-"],
+      ["Order ID", invoice.order_id || "-"],
+      ["Amount Paid", `INR ${formatMoney(invoice.amount_paid || 0)}`],
+      ["Total Fee", `INR ${formatMoney(invoice.amount_total || 0)}`],
+      ["Remaining", `INR ${formatMoney(invoice.balance_due || 0)}`],
+    ];
+
+    let y = 640;
+    for (const [k, v] of lines) {
+      page.drawText(`${k}:`, { x: 42, y, size: 12, font: fontBold, color: muted });
+      page.drawText(String(v), { x: 180, y, size: 12, font, color: rgb(0.08, 0.08, 0.08) });
+      y -= 28;
+    }
+
+    page.drawText("Arunand's Aviation Institute", {
+      x: 42,
+      y: 80,
+      size: 11,
+      font: fontBold,
+      color: accent,
+    });
+    page.drawText("Thank you for your payment.", {
+      x: 42,
+      y: 62,
+      size: 10,
+      font,
+      color: dim,
+    });
+
+    page.drawText("Authorized Signature", { x: 42, y: 110, size: 10, font: fontBold, color: muted });
+    page.drawLine({ start: { x: 42, y: 104 }, end: { x: 220, y: 104 }, thickness: 0.6, color: muted });
+    page.drawText("Student Signature", { x: 300, y: 110, size: 10, font: fontBold, color: muted });
+    page.drawLine({ start: { x: 300, y: 104 }, end: { x: 553, y: 104 }, thickness: 0.6, color: muted });
+  };
+
+  drawReceiptPage("Student Copy");
+  drawReceiptPage("Office Copy");
 
   const bytes = await pdfDoc.save();
   const blob = new Blob([bytes], { type: "application/pdf" });

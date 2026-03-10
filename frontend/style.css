@@ -403,6 +403,24 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  justify-content: space-between;
+}
+
+.student-row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.student-fee-total {
+  font-size: 12px;
+  color: var(--accent-dark);
+  background: var(--chip);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
 }
 
 .student-actions {
@@ -431,6 +449,29 @@ body {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 8px;
+}
+
+.test-question-main {
+  margin-bottom: 10px;
+}
+
+.test-question-text {
+  width: 100%;
+  min-height: 80px;
+  resize: vertical;
+}
+
+.test-options-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.test-correct-row {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .attempt-question {
@@ -752,6 +793,10 @@ select {
 
   .attendance-percent-value {
     font-size: 40px;
+  }
+
+  .test-options-grid {
+    grid-template-columns: 1fr;
   }
 
   th,
