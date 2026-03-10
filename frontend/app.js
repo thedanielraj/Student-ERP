@@ -779,25 +779,34 @@ async function generateAdmissionPdfAttachment(payload) {
       borderColor: accent,
       borderWidth: 1.2,
     });
+    const headerTop = 792;
+    const logoY = headerTop - logoHeight + 4;
     if (logoImage) {
       page.drawImage(logoImage, {
         x: 42,
-        y: 760,
+        y: logoY,
         width: logoWidth,
         height: logoHeight,
       });
     }
     const headerX = 42 + (logoWidth ? logoWidth + 16 : 0);
-    page.drawText("Admission Form", {
+    page.drawText("Arunand's Aviation Institute", {
       x: headerX,
-      y: 792,
-      size: 20,
+      y: headerTop,
+      size: 16,
       font: bold,
       color: accent,
     });
+    page.drawText("Admission Form", {
+      x: headerX,
+      y: headerTop - 18,
+      size: 14,
+      font,
+      color: muted,
+    });
     page.drawText(copyLabel, {
       x: headerX,
-      y: 772,
+      y: headerTop - 34,
       size: 11,
       font,
       color: muted,
@@ -810,17 +819,27 @@ async function generateAdmissionPdfAttachment(payload) {
       font,
       color: muted,
     });
+    const photoX = 452;
+    const photoY = headerTop - 88;
+    const photoW = 100;
+    const photoH = 120;
     page.drawRectangle({
-      x: 470,
-      y: 730,
-      width: 90,
-      height: 110,
+      x: photoX,
+      y: photoY,
+      width: photoW,
+      height: photoH,
       borderColor: muted,
       borderWidth: 0.8,
     });
-    page.drawText("Photo", { x: 496, y: 782, size: 9, font, color: muted });
+    page.drawText("Photo", {
+      x: photoX + 30,
+      y: photoY + photoH - 16,
+      size: 9,
+      font,
+      color: muted,
+    });
 
-    let y = 710;
+    let y = 700;
     y = drawSectionTitle(page, "Applicant Details", y);
     y = drawRow(page, "Full Name", `${payload.first_name || ""} ${payload.middle_name || ""} ${payload.last_name || ""}`.trim(), y);
     y = drawRow(page, "Course Applied", payload.course || "-", y);
