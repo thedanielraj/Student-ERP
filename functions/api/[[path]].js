@@ -203,22 +203,99 @@ function random8Digits() {
 
 async function ensureCredentials(env) {
   await env.DB.prepare(
-    "INSERT OR IGNORE INTO credentials (username, password, role) VALUES ('superuser', 'qwerty', 'superuser')"
-  ).run();
+    "INSERT OR IGNORE INTO credentials (username, password, role) VALUES ('superuser', ?, 'superuser')"
+  ).bind(await hashPassword("qwerty")).run();
   await env.DB.prepare(
-    "INSERT OR IGNORE INTO credentials (username, password, role) VALUES ('praharsh', '9121726565', 'staff')"
-  ).run();
+    "INSERT OR IGNORE INTO credentials (username, password, role) VALUES ('praharsh', ?, 'staff')"
+  ).bind(await hashPassword("9121726565")).run();
   await env.DB.prepare(
-    "INSERT OR IGNORE INTO credentials (username, password, role) VALUES ('nanda', '8124326444', 'staff')"
-  ).run();
+    "INSERT OR IGNORE INTO credentials (username, password, role) VALUES ('nanda', ?, 'staff')"
+  ).bind(await hashPassword("8124326444")).run();
   const students = await env.DB.prepare("SELECT student_id FROM students").all();
   for (const row of students.results || []) {
     if (/\d/.test(String(row.student_id))) {
       await env.DB.prepare(
         "INSERT OR IGNORE INTO credentials (username, password, role) VALUES (?, ?, 'student')"
-      ).bind(row.student_id, random8Digits()).run();
+      ).bind(row.student_id, await hashPassword(random8Digits())).run();
     }
   }
+}
+
+const PASSWORD_HASH_PREFIX = "pbkdf2";
+const PASSWORD_HASH_ITERATIONS = 120000;
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function base64ToBytes(str) {
+  const binary = atob(str || "");
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+async function hashPassword(password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(String(password || "")),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt,
+      iterations: PASSWORD_HASH_ITERATIONS,
+      hash: "SHA-256",
+    },
+    key,
+    256
+  );
+  const hash = new Uint8Array(bits);
+  return `${PASSWORD_HASH_PREFIX}$${PASSWORD_HASH_ITERATIONS}$${bytesToBase64(salt)}$${bytesToBase64(hash)}`;
+}
+
+async function verifyPassword(storedPassword, plainPassword) {
+  const stored = String(storedPassword || "");
+  if (!stored) return { ok: false, needsUpgrade: false };
+  if (!stored.startsWith(`${PASSWORD_HASH_PREFIX}$`)) {
+    return { ok: stored === String(plainPassword || ""), needsUpgrade: true };
+  }
+  const parts = stored.split("$");
+  if (parts.length !== 4) return { ok: false, needsUpgrade: false };
+  const iterations = Number(parts[1] || PASSWORD_HASH_ITERATIONS);
+  const salt = base64ToBytes(parts[2] || "");
+  const expected = parts[3] || "";
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(String(plainPassword || "")),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt,
+      iterations,
+      hash: "SHA-256",
+    },
+    key,
+    256
+  );
+  const actual = bytesToBase64(new Uint8Array(bits));
+  return { ok: actual === expected, needsUpgrade: false };
 }
 
 async function ensureActivityTable(env) {
@@ -365,9 +442,15 @@ async function handleLogin(request, env) {
   const username = String(body.username || "").trim();
   const password = String(body.password || "").trim();
   const cred = await env.DB.prepare(
-    "SELECT username, role FROM credentials WHERE username = ? AND password = ?"
-  ).bind(username, password).first();
+    "SELECT username, role, password FROM credentials WHERE username = ?"
+  ).bind(username).first();
   if (!cred) throw httpError(401, "Invalid credentials");
+  const verification = await verifyPassword(cred.password, password);
+  if (!verification.ok) throw httpError(401, "Invalid credentials");
+  if (verification.needsUpgrade) {
+    await env.DB.prepare("UPDATE credentials SET password = ? WHERE username = ?")
+      .bind(await hashPassword(password), username).run();
+  }
   const token = crypto.randomUUID().replace(/-/g, "");
   const now = Math.floor(Date.now() / 1000);
   const timeout = Number(env.SESSION_TIMEOUT_SECONDS || "300");
@@ -411,11 +494,13 @@ async function authChangePassword(request, session, env) {
   if (!currentPassword || !newPassword) throw httpError(400, "current_password and new_password are required");
   if (newPassword.length < 6) throw httpError(400, "New password must be at least 6 characters");
   const cred = await env.DB.prepare(
-    "SELECT username FROM credentials WHERE username = ? AND password = ?"
-  ).bind(session.user_id, currentPassword).first();
+    "SELECT username, password FROM credentials WHERE username = ?"
+  ).bind(session.user_id).first();
   if (!cred) throw httpError(400, "Current password is incorrect");
+  const verification = await verifyPassword(cred.password, currentPassword);
+  if (!verification.ok) throw httpError(400, "Current password is incorrect");
   await env.DB.prepare("UPDATE credentials SET password = ? WHERE username = ?")
-    .bind(newPassword, session.user_id).run();
+    .bind(await hashPassword(newPassword), session.user_id).run();
   await writeActivity(env, session, "password_changed", `Password changed for ${session.user_id}`, { username: session.user_id });
   return json({ status: "ok", message: "Password updated" });
 }
@@ -431,7 +516,7 @@ async function adminSetUserPassword(request, session, env) {
   const existing = await env.DB.prepare("SELECT username FROM credentials WHERE username = ?").bind(username).first();
   if (!existing) throw httpError(404, "User not found");
   await env.DB.prepare("UPDATE credentials SET password = ? WHERE username = ?")
-    .bind(newPassword, username).run();
+    .bind(await hashPassword(newPassword), username).run();
   await writeActivity(env, session, "password_reset", `Password reset for ${username}`, { username });
   return json({ status: "ok", message: "User password updated" });
 }
