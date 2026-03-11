@@ -4,6 +4,7 @@ const API = LOCAL_FASTAPI_HOSTS.includes(window.location.host)
   : `${window.location.origin}/api`;
 const TOKEN_KEY = "authToken";
 const ATTENDANCE_QUEUE_KEY = "offlineAttendanceQueue";
+const INSTALL_DISMISS_KEY = "installBannerDismissedUntil";
 const NATO_BATCHES = [
   "Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliett",
   "Kilo", "Lima", "Mike", "November", "Oscar", "Papa", "Quebec", "Romeo", "Sierra", "Tango",
@@ -24,6 +25,7 @@ let latestAnnouncementIdSeen = Number(localStorage.getItem("latestAnnouncementId
 let announcementsNotifierBootstrapped = false;
 let admissionsCache = [];
 let attendanceQueueFlushing = false;
+let deferredInstallPrompt = null;
 let leadsState = {
   cache: [],
   statusFilter: "all",
@@ -404,6 +406,28 @@ function registerServiceWorker() {
   });
 }
 
+function updateOfflineStatus() {
+  const el = document.getElementById("offlineStatus");
+  if (!el) return;
+  const queued = getAttendanceQueue().length;
+  const online = navigator.onLine;
+
+  el.classList.remove("offline", "syncing");
+  if (!online) {
+    el.textContent = queued ? `Offline • ${queued} queued` : "Offline";
+    el.classList.add("offline");
+    el.classList.remove("hidden");
+    return;
+  }
+  if (queued) {
+    el.textContent = `Syncing • ${queued} queued`;
+    el.classList.add("syncing");
+    el.classList.remove("hidden");
+    return;
+  }
+  el.classList.add("hidden");
+}
+
 function getAttendanceQueue() {
   try {
     const raw = localStorage.getItem(ATTENDANCE_QUEUE_KEY);
@@ -426,6 +450,7 @@ function enqueueAttendance(payload) {
     queued_at: new Date().toISOString(),
   });
   saveAttendanceQueue(queue);
+  updateOfflineStatus();
 }
 
 async function flushAttendanceQueue() {
@@ -454,6 +479,7 @@ async function flushAttendanceQueue() {
     }
   }
   saveAttendanceQueue(remaining);
+  updateOfflineStatus();
   attendanceQueueFlushing = false;
 }
 
@@ -461,7 +487,55 @@ function initOfflineAttendanceSync() {
   window.addEventListener("online", () => {
     flushAttendanceQueue();
   });
+  window.addEventListener("offline", () => {
+    updateOfflineStatus();
+  });
   flushAttendanceQueue();
+  updateOfflineStatus();
+}
+
+function shouldShowInstallBanner() {
+  if (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) {
+    return false;
+  }
+  const until = Number(localStorage.getItem(INSTALL_DISMISS_KEY) || 0);
+  return Date.now() > until;
+}
+
+function showInstallBanner(show) {
+  const banner = document.getElementById("installBanner");
+  if (!banner) return;
+  banner.classList.toggle("hidden", !show);
+}
+
+function initInstallPrompt() {
+  const installBtn = document.getElementById("installBtn");
+  const laterBtn = document.getElementById("installLaterBtn");
+  installBtn?.addEventListener("click", async () => {
+    if (!deferredInstallPrompt) return;
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice.catch(() => null);
+    deferredInstallPrompt = null;
+    showInstallBanner(false);
+  });
+  laterBtn?.addEventListener("click", () => {
+    const oneWeek = 7 * 24 * 60 * 60 * 1000;
+    localStorage.setItem(INSTALL_DISMISS_KEY, String(Date.now() + oneWeek));
+    showInstallBanner(false);
+  });
+
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    if (shouldShowInstallBanner()) {
+      showInstallBanner(true);
+    }
+  });
+
+  window.addEventListener("appinstalled", () => {
+    deferredInstallPrompt = null;
+    showInstallBanner(false);
+  });
 }
 
 function setupTabs() {
@@ -483,6 +557,7 @@ setupSidebarNav();
 setupGlobalSearch();
 registerServiceWorker();
 initOfflineAttendanceSync();
+initInstallPrompt();
 initSidebarUX();
 loadProudAlumni();
 initChatbot();

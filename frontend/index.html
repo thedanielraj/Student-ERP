@@ -1107,6 +1107,17 @@
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdf-lib/dist/pdf-lib.min.js"></script>
   <script src="/app.js"></script>
+  <div id="offlineStatus" class="offline-status hidden"></div>
+  <div id="installBanner" class="install-banner hidden" role="dialog" aria-live="polite">
+    <div class="install-text">
+      <strong>Install Arunand's Aviation ERP</strong>
+      <span class="hint">Get quick access and offline-ready attendance.</span>
+    </div>
+    <div class="install-actions">
+      <button class="btn primary" id="installBtn">Install</button>
+      <button class="btn" id="installLaterBtn">Later</button>
+    </div>
+  </div>
 </body>
 
 </html>

@@ -457,6 +457,60 @@ body {
   border: 1px solid var(--line);
 }
 
+.offline-status {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  background: var(--chip);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 8px 20px rgba(15, 40, 80, 0.12);
+  z-index: 40;
+}
+
+.offline-status.offline {
+  background: #fdeaea;
+  border-color: #f2b9b9;
+  color: #7a1f1f;
+}
+
+.offline-status.syncing {
+  background: #fff3cd;
+  border-color: #f0d48a;
+  color: #6a4b00;
+}
+
+.install-banner {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-shadow: var(--shadow);
+  z-index: 50;
+  max-width: min(680px, 92vw);
+}
+
+.install-text {
+  display: grid;
+  gap: 4px;
+}
+
+.install-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -599,6 +653,16 @@ body {
   }
   .chatbot-panel {
     width: 90vw;
+  }
+  .install-banner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .install-actions {
+    width: 100%;
+  }
+  .install-actions .btn {
+    flex: 1;
   }
 }
 
