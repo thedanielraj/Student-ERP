@@ -331,6 +331,7 @@
           </div>
           <div class="top-actions">
             <button class="btn" onclick="loadRecentAttendance()">Refresh</button>
+            <button class="btn" onclick="exportAttendanceCsv()">Export CSV</button>
           </div>
         </header>
         <section class="panel">
@@ -460,6 +461,8 @@
           </div>
           <div class="top-actions">
             <button id="feesRefreshBtn" class="btn" onclick="renderFeesEntryList()">Refresh</button>
+            <button class="btn" onclick="exportFeesCsv()">Export CSV</button>
+            <button class="btn" onclick="sendFeeReminders()">Send Fee Reminders</button>
           </div>
         </header>
         <section id="studentFeePanel" class="panel hidden">
@@ -911,6 +914,7 @@
           </div>
           <div class="top-actions">
             <button class="btn" onclick="loadReports()">Refresh</button>
+            <button class="btn" onclick="exportReportsCsv()">Export CSV</button>
           </div>
         </header>
         <section class="grid">

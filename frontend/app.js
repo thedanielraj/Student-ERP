@@ -2135,6 +2135,82 @@ function exportLeadsCsv() {
   URL.revokeObjectURL(link.href);
 }
 
+function exportAttendanceCsv() {
+  const body = document.getElementById("recentAttendanceBody");
+  if (!body) return;
+  const rows = Array.from(body.querySelectorAll("tr"));
+  if (!rows.length || rows[0].querySelector(".empty")) {
+    alert("No attendance data to export.");
+    return;
+  }
+  const headers = ["Date", "Student", "Status", "Remarks"];
+  const data = rows.map((row) => Array.from(row.children).map((cell) => String(cell.textContent || "").trim()));
+  downloadCsv(headers, data, `attendance_${getTodayIso()}.csv`);
+}
+
+function exportFeesCsv() {
+  const body = document.getElementById("feeEntryBody");
+  if (!body) return;
+  const rows = Array.from(body.querySelectorAll("tr"));
+  if (!rows.length || rows[0].querySelector(".empty")) {
+    alert("No fee data to export.");
+    return;
+  }
+  const headers = ["Student", "Batch", "Total Fee", "Paid", "Remarks", "Concession", "Deadline"];
+  const data = rows.map((row) => {
+    const cells = Array.from(row.children);
+    const student = String(cells[0]?.textContent || "").trim();
+    const batch = String(cells[1]?.textContent || "").trim();
+    const total = "150000";
+    const paid = String(cells[3]?.querySelector("input")?.value || "").trim();
+    const remarks = String(cells[5]?.querySelector("input")?.value || "").trim();
+    const concession = String(cells[6]?.querySelector("input")?.value || "").trim();
+    const deadline = String(cells[7]?.querySelector("input")?.value || "").trim();
+    return [student, batch, total, paid, remarks, concession, deadline];
+  });
+  downloadCsv(headers, data, `fees_${getTodayIso()}.csv`);
+}
+
+function exportReportsCsv() {
+  const rows = [
+    ["Students", document.getElementById("reportStudents")?.textContent || ""],
+    ["Fees Total", document.getElementById("reportFeesTotal")?.textContent || ""],
+    ["Fees Paid", document.getElementById("reportFeesPaid")?.textContent || ""],
+    ["Balance Due", document.getElementById("reportBalance")?.textContent || ""],
+    ["Present", document.getElementById("reportPresent")?.textContent || ""],
+    ["Absent", document.getElementById("reportAbsent")?.textContent || ""],
+  ];
+  downloadCsv(["Metric", "Value"], rows, `reports_${getTodayIso()}.csv`);
+}
+
+function downloadCsv(headers, rows, filename) {
+  const csvLines = [headers.join(",")].concat(
+    rows.map((row) => row.map((value) => `"${String(value).replace(/"/g, "\"\"")}"`).join(","))
+  );
+  const blob = new Blob([csvLines.join("\n")], { type: "text/csv" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+async function sendFeeReminders() {
+  if (!confirm("Send fee reminders to students with upcoming due dates?")) return;
+  const res = await authFetch(`${API}/fees/reminders`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ days: 7 }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "Failed to send reminders.");
+    return;
+  }
+  const data = await res.json().catch(() => ({}));
+  alert(`Reminders sent: ${data.sent || 0}`);
+}
+
 function parseAcademicDetails(raw) {
   if (Array.isArray(raw)) return raw;
   if (!raw) return [];

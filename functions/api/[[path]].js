@@ -98,6 +98,7 @@ export async function onRequest(context) {
     if (path === "fees/recent" && method === "GET") return feesRecent(session, env);
     if (path === "fees/summary" && method === "GET") return feesSummary(session, env);
     if (path === "fees/record" && method === "POST") return feesRecord(request, session, env);
+    if (path === "fees/reminders" && method === "POST") return feesReminders(request, session, env);
     if (path === "fees/admin/policies" && method === "GET") return feesPoliciesList(session, env);
     if (path === "fees/admin/policy" && method === "POST") return feesPolicyUpsert(request, session, env);
     if (path === "fees/admin/reset-unpaid" && method === "POST") return feesResetUnpaid(session, env);
@@ -2039,6 +2040,38 @@ async function feesRecord(request, session, env) {
     { fee_id: feeId, student_id: studentId, amount_paid: amountPaid }
   );
   return json({ status: "ok", message: "Fee recorded" });
+}
+
+async function feesReminders(request, session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  const body = await request.json().catch(() => ({}));
+  const days = Math.max(1, Math.min(Number(body.days || 7), 30));
+  const today = new Date().toISOString().slice(0, 10);
+  const maxDate = (() => {
+    const d = new Date(`${today}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  })();
+  const students = await env.DB.prepare("SELECT student_id FROM students").all();
+  let sent = 0;
+  for (const row of students.results || []) {
+    const sid = String(row.student_id || "");
+    if (!sid) continue;
+    const info = await studentFinancials(env, sid);
+    if (!info) continue;
+    const due = Number(info.due || 0);
+    const dueDate = String(info.due_date || "").trim();
+    if (!dueDate || due <= 0) continue;
+    if (dueDate < today || dueDate > maxDate) continue;
+    const title = "Fee Reminder";
+    const message = `Your fee balance is INR ${due}. Due date: ${dueDate}.`;
+    await env.DB.prepare(
+      "INSERT INTO notifications (title, message, level, target_user) VALUES (?, ?, ?, ?)"
+    ).bind(title, message, "info", sid).run();
+    sent += 1;
+  }
+  await writeActivity(env, session, "fee_reminders_sent", `Sent ${sent} fee reminders`, { days, sent });
+  return json({ status: "ok", sent, days });
 }
 
 async function feesPoliciesList(session, env) {
