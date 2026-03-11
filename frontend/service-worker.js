@@ -20,7 +20,6 @@ const APP_SHELL = [
   "/js/parent.js",
   "/js/ui.js",
   "/js/errors.js",
-  "/js/state.js",
   "/manifest.json",
   "/assets/logo.png"
 ];

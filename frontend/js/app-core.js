@@ -1,10 +1,12 @@
 import { handleApiError } from "./errors.js";
 
+import { handleApiError } from "./errors.js";
+
 const LOCAL_FASTAPI_HOSTS = ["127.0.0.1:8000", "localhost:8000"];
-const API = LOCAL_FASTAPI_HOSTS.includes(window.location.host)
+export const API = LOCAL_FASTAPI_HOSTS.includes(window.location.host)
   ? window.location.origin
   : `${window.location.origin}/api`;
-const TOKEN_KEY = "authToken";
+export const TOKEN_KEY = "authToken";
 const ATTENDANCE_QUEUE_KEY = "offlineAttendanceQueue";
 const INSTALL_DISMISS_KEY = "installBannerDismissedUntil";
 const NATO_BATCHES = [
@@ -13,14 +15,14 @@ const NATO_BATCHES = [
   "Uniform", "Victor", "Whiskey", "X-ray", "Yankee", "Zulu",
 ];
 
-let allStudents = [];
+export let allStudents = [];
 let selectedId = null;
-let authInfo = null;
+export let authInfo = null;
 let studentFeeSummary = null;
 let razorpayKeyId = null;
 let feePoliciesByStudent = {};
 let portalMode = "student";
-let alumniSelectedIds = new Set();
+export let alumniSelectedIds = new Set();
 let selectedStudentIds = new Set();
 let announcementPollTimer = null;
 let latestAnnouncementIdSeen = Number(localStorage.getItem("latestAnnouncementIdSeen") || 0);
@@ -35,7 +37,7 @@ let leadsState = {
   upcomingOnly: false,
 };
 let parentMode = false;
-let chatbotState = {
+export let chatbotState = {
   initialized: false,
   step: "greeting",
   intent: "",
@@ -567,23 +569,6 @@ function setupTabs() {
   });
 }
 
-function initChatbot() {
-  const messages = document.getElementById("chatbotMessages");
-  if (!messages || chatbotState.initialized) return;
-  chatbotState.initialized = true;
-  addChatbotMessage("bot", "Hello! Welcome to Arunand's Aviation Academy - Bangalore.");
-  addChatbotMessage("bot", "I can help with courses, fees, eligibility, admissions, and counselor connect.");
-  addChatbotMessage("bot", "To personalize this, what's your name?");
-  chatbotState.step = "ask_name";
-  const input = document.getElementById("chatbotInput");
-  input?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      sendChatbotMessage();
-    }
-  });
-}
-
 function initParentPortal() {
   const params = new URLSearchParams(window.location.search);
   const token = params.get("parent_token");
@@ -628,173 +613,6 @@ async function loadParentSummary(token) {
         body.appendChild(tr);
       });
     }
-  }
-}
-
-function toggleChatbot() {
-  const panel = document.getElementById("chatbotPanel");
-  if (!panel) return;
-  panel.classList.toggle("hidden");
-  if (!panel.classList.contains("hidden")) {
-    initChatbot();
-    document.getElementById("chatbotInput")?.focus();
-  }
-}
-
-function addChatbotMessage(role, text) {
-  const messages = document.getElementById("chatbotMessages");
-  if (!messages) return;
-  const bubble = document.createElement("div");
-  bubble.className = `chatbot-bubble ${role === "user" ? "user" : "bot"}`;
-  bubble.textContent = text;
-  messages.appendChild(bubble);
-  messages.scrollTop = messages.scrollHeight;
-}
-
-function extractPhoneNumber(text) {
-  const digits = String(text || "").replace(/\D/g, "");
-  return /^\d{10}$/.test(digits) ? digits : "";
-}
-
-async function submitChatbotLead() {
-  const payload = {
-    name: chatbotState.profile.name,
-    age: chatbotState.profile.age,
-    qualification: chatbotState.profile.qualification,
-    location: chatbotState.profile.location,
-    phone: chatbotState.profile.phone,
-    preferred_time: chatbotState.profile.preferred_time,
-    intent: chatbotState.intent,
-  };
-  const res = await fetch(`${API}/leads`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    addChatbotMessage("bot", err.detail || "Sorry, I could not save your details. Please try again.");
-    return false;
-  }
-  addChatbotMessage("bot", "Thanks! Our team will contact you soon.");
-  return true;
-}
-
-async function sendChatbotMessage() {
-  const input = document.getElementById("chatbotInput");
-  const text = String(input?.value || "").trim();
-  if (!text) return;
-  addChatbotMessage("user", text);
-  if (input) input.value = "";
-
-  const lower = text.toLowerCase();
-
-  if (chatbotState.step === "ask_name") {
-    chatbotState.profile.name = text.split(" ")[0] || text;
-    chatbotState.step = "ask_age";
-    addChatbotMessage("bot", `Nice to meet you, ${chatbotState.profile.name}. What's your age?`);
-    return;
-  }
-
-  if (chatbotState.step === "ask_age") {
-    const ageMatch = text.match(/\d{2}/);
-    chatbotState.profile.age = ageMatch ? ageMatch[0] : text;
-    chatbotState.step = "ask_qualification";
-    addChatbotMessage("bot", "Thanks. What's your highest qualification?");
-    return;
-  }
-
-  if (chatbotState.step === "ask_qualification") {
-    chatbotState.profile.qualification = text;
-    chatbotState.step = "ask_location";
-    addChatbotMessage("bot", "Got it. Which city or location are you from?");
-    return;
-  }
-
-  if (chatbotState.step === "ask_location") {
-    chatbotState.profile.location = text;
-    chatbotState.step = "menu";
-    addChatbotMessage(
-      "bot",
-      `Thanks ${chatbotState.profile.name}. How can I help you next?\n1. Register your details\n2. Course Details\n3. Fees\n4. Eligibility\n5. Talk to Counsellor\n6. Christmas & New Year Offers`
-    );
-    return;
-  }
-
-  if (chatbotState.step === "ask_phone") {
-    const phone = extractPhoneNumber(text);
-    if (!phone) {
-      addChatbotMessage("bot", "Please share a valid 10 digit phone number.");
-      return;
-    }
-    chatbotState.profile.phone = phone;
-    chatbotState.step = "ask_time";
-    addChatbotMessage("bot", "Thanks. What is your preferred time to receive a call?");
-    return;
-  }
-
-  if (chatbotState.step === "ask_time") {
-    chatbotState.profile.preferred_time = text;
-    const ok = await submitChatbotLead();
-    if (ok) {
-      chatbotState.step = "menu";
-      addChatbotMessage("bot", "Anything else I can help you with? You can type 1-6 or say 'fees', 'courses', etc.");
-    }
-    return;
-  }
-
-  if (chatbotState.step === "menu") {
-    const choice = text.replace(/[^\d]/g, "");
-    const phoneInline = extractPhoneNumber(text);
-    if (choice === "1" || /register|details/.test(lower)) {
-      chatbotState.intent = "register";
-      chatbotState.step = "ask_phone";
-      if (phoneInline) {
-        chatbotState.profile.phone = phoneInline;
-        chatbotState.step = "ask_time";
-        addChatbotMessage("bot", "Thanks. What is your preferred time to receive a call?");
-        return;
-      }
-      addChatbotMessage("bot", "Please share your 10 digit phone number.");
-      return;
-    }
-    if (choice === "2" || /course|courses/.test(lower)) {
-      addChatbotMessage("bot", "We offer Ground Operations and Cabin Crew.\nWould you like details for a specific course?");
-      return;
-    }
-    if (choice === "3" || /fee|fees|cost|price/.test(lower)) {
-      addChatbotMessage("bot", "Fees are INR 1.5L. We also offer installment options.\nWould you like the fee breakup?");
-      return;
-    }
-    if (choice === "4" || /eligibility|eligible|criteria/.test(lower)) {
-      addChatbotMessage("bot", "Eligibility typically requires 10+2 pass and good communication skills.\nWant the detailed criteria for Ground Operations or Cabin Crew?");
-      return;
-    }
-    if (choice === "5" || /counsellor|counselor|call|talk/.test(lower)) {
-      chatbotState.intent = "counsellor";
-      chatbotState.step = "ask_phone";
-      if (phoneInline) {
-        chatbotState.profile.phone = phoneInline;
-        chatbotState.step = "ask_time";
-        addChatbotMessage("bot", "Thanks. What is your preferred time to receive a call?");
-        return;
-      }
-      addChatbotMessage("bot", "Sure. Please share your 10 digit phone number.");
-      return;
-    }
-    if (choice === "6" || /offer|offers|discount|new year|christmas/.test(lower)) {
-      chatbotState.intent = "offers";
-      chatbotState.step = "ask_phone";
-      if (phoneInline) {
-        chatbotState.profile.phone = phoneInline;
-        chatbotState.step = "ask_time";
-        addChatbotMessage("bot", "Thanks. What is your preferred time to receive a call?");
-        return;
-      }
-      addChatbotMessage("bot", "We have seasonal offers. Please share your 10 digit phone number.");
-      return;
-    }
-    addChatbotMessage("bot", "You can type a number (1-6) or say things like 'fees', 'courses', or 'talk to counsellor'.");
   }
 }
 
@@ -1605,10 +1423,10 @@ function switchSection(target) {
   }
   localStorage.setItem("activeSection", target);
   if (target === "attendance") {
-    ensureAttendanceDateConstraints();
-    renderTodayAttendance();
-    renderBackAttendance();
-    loadAttendanceCalendar();
+    window.ensureAttendanceDateConstraints?.();
+    window.renderTodayAttendance?.();
+    window.renderBackAttendance?.();
+    window.loadAttendanceCalendar?.();
   }
   if (target === "fees") {
     loadFeePolicies();
@@ -1651,87 +1469,6 @@ function switchSection(target) {
   if (window.matchMedia && window.matchMedia("(max-width: 1100px)").matches) {
     setSidebarOpen("app", false);
   }
-}
-
-async function loadRecentAttendance() {
-  const res = await authFetch(`${API}/attendance/recent`);
-  const rows = await res.json();
-  const body = document.getElementById("recentAttendanceBody");
-  body.innerHTML = "";
-
-  if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="4" class="empty">No attendance records</td></tr>`;
-    return;
-  }
-
-  rows.forEach(r => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${formatDateDDMMYYYY(r.date || "-")}</td>
-      <td>${r.student_name || r.student_id}</td>
-      <td>${r.attendance_status || "-"}</td>
-      <td>${r.remarks || ""}</td>
-    `;
-    body.appendChild(tr);
-  });
-
-  if (authInfo && authInfo.role === "student") {
-    updateAttendancePercentFromRows(rows);
-  }
-}
-
-async function loadAttendanceByDate() {
-  const date = document.getElementById("attendanceDate").value;
-  if (!date) {
-    alert("Select a date first.");
-    return;
-  }
-  const res = await authFetch(`${API}/attendance/by-date?date=${encodeURIComponent(date)}`);
-  const rows = await res.json();
-  const body = document.getElementById("recentAttendanceBody");
-  body.innerHTML = "";
-
-  if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="4" class="empty">No attendance records for ${date}</td></tr>`;
-    return;
-  }
-
-  rows.forEach(r => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${formatDateDDMMYYYY(r.date || "-")}</td>
-      <td>${r.student_name || r.student_id}</td>
-      <td>${r.attendance_status || "-"}</td>
-      <td>${r.remarks || ""}</td>
-    `;
-    body.appendChild(tr);
-  });
-
-  if (authInfo && authInfo.role === "student") {
-    updateAttendancePercentFromRows(rows);
-  }
-}
-
-async function syncAttendanceFromExcel() {
-  const fileInput = document.getElementById("attendanceSyncFile");
-  const file = fileInput?.files?.[0];
-  let res;
-  if (file) {
-    const form = new FormData();
-    form.append("file", file);
-    res = await authFetch(`${API}/attendance/sync/upload`, { method: "POST", body: form });
-  } else {
-    res = await authFetch(`${API}/attendance/sync`, { method: "POST" });
-  }
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    alert(err.detail || "Failed to sync from Excel.");
-    return;
-  }
-  const data = await res.json().catch(() => ({}));
-  await loadRecentAttendance();
-  if (fileInput) fileInput.value = "";
-  alert(`${data.message || "Sync complete"}. Inserted: ${data.inserted ?? 0}, Skipped: ${data.skipped ?? 0}`);
 }
 
 async function loadRecentFees() {
@@ -3051,7 +2788,7 @@ async function undoActivity(activityId) {
   await Promise.all([
     loadActivityLogs(),
     loadStudents(),
-    loadRecentAttendance(),
+    window.loadRecentAttendance?.(),
     loadFeeSummary(),
     loadReports(),
   ]);
@@ -3227,122 +2964,6 @@ function getTodayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function ensureAttendanceDateConstraints() {
-  const today = getTodayIso();
-  const backDate = document.getElementById("backDate");
-  const todayLabel = document.getElementById("todayAttendanceDate");
-  if (todayLabel) {
-    todayLabel.textContent = formatDateDDMMYYYY(today);
-  }
-  if (backDate) {
-    backDate.max = today;
-    if (!backDate.value) {
-      backDate.value = today;
-    } else if (backDate.value > today) {
-      backDate.value = today;
-    }
-  }
-}
-
-function getRollCallStudents() {
-  return allStudents.filter((s) => !alumniSelectedIds.has(String(s.student_id)));
-}
-
-function renderAttendanceForm(date, opts) {
-  const { bodyId, toggleClass, remarkClass, presentId, absentId, emptyMsg } = opts;
-  const body = document.getElementById(bodyId);
-  if (!body) return;
-  body.innerHTML = "";
-
-  if (!date) {
-    body.innerHTML = `<tr><td colspan="4" class="empty">Select a date to load students</td></tr>`;
-    updateAttendanceCounts(toggleClass, presentId, absentId);
-    return;
-  }
-
-  if (date > getTodayIso()) {
-    body.innerHTML = `<tr><td colspan="4" class="empty">Future dates are not allowed</td></tr>`;
-    updateAttendanceCounts(toggleClass, presentId, absentId);
-    return;
-  }
-
-  if (!allStudents.length) {
-    body.innerHTML = `<tr><td colspan="4" class="empty">No students found</td></tr>`;
-    updateAttendanceCounts(toggleClass, presentId, absentId);
-    return;
-  }
-
-  const rollCallStudents = getRollCallStudents();
-  if (!rollCallStudents.length) {
-    body.innerHTML = `<tr><td colspan="4" class="empty">${emptyMsg}</td></tr>`;
-    updateAttendanceCounts(toggleClass, presentId, absentId);
-    return;
-  }
-
-  rollCallStudents.forEach((s) => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${s.student_name} (ID: ${s.student_id})</td>
-      <td>${s.batch}</td>
-      <td>
-        <label>
-          <input type="checkbox" class="${toggleClass}" data-id="${s.student_id}">
-          Present
-        </label>
-      </td>
-      <td>
-        <input class="${remarkClass}" data-id="${s.student_id}" placeholder="Remarks (optional)" />
-      </td>
-    `;
-    body.appendChild(tr);
-  });
-
-  document.querySelectorAll(`.${toggleClass}`).forEach((cb) => {
-    cb.addEventListener("change", () => updateAttendanceCounts(toggleClass, presentId, absentId));
-  });
-  updateAttendanceCounts(toggleClass, presentId, absentId);
-}
-
-function renderTodayAttendance() {
-  if (authInfo && authInfo.role === "student") return;
-  ensureAttendanceDateConstraints();
-  renderAttendanceForm(getTodayIso(), {
-    bodyId: "todayAttendanceBody",
-    toggleClass: "today-present-toggle",
-    remarkClass: "today-remark-input",
-    presentId: "todayPresentCount",
-    absentId: "todayAbsentCount",
-    emptyMsg: "All current students are marked as alumni/selected. No roll call entries.",
-  });
-}
-
-function renderBackAttendance() {
-  if (authInfo && authInfo.role === "student") return;
-  ensureAttendanceDateConstraints();
-  const date = document.getElementById("backDate")?.value || "";
-  renderAttendanceForm(date, {
-    bodyId: "backAttendanceBody",
-    toggleClass: "back-present-toggle",
-    remarkClass: "back-remark-input",
-    presentId: "backPresentCount",
-    absentId: "backAbsentCount",
-    emptyMsg: "All current students are marked as alumni/selected. No roll call entries.",
-  });
-}
-
-function updateAttendanceCounts(toggleClass, presentId, absentId) {
-  const toggles = document.querySelectorAll(`.${toggleClass}`);
-  let present = 0;
-  toggles.forEach((t) => {
-    if (t.checked) present += 1;
-  });
-  const total = toggles.length;
-  const p = document.getElementById(presentId);
-  const a = document.getElementById(absentId);
-  if (p) p.textContent = String(present);
-  if (a) a.textContent = String(Math.max(total - present, 0));
-}
-
 function updateAttendancePercentFromRows(rows) {
   let present = 0;
   let total = 0;
@@ -3365,100 +2986,6 @@ function updateAttendancePercent(present, total) {
   if (metricEl) metricEl.textContent = pctText;
 }
 
-async function submitAttendanceForDate(date, opts) {
-  if (authInfo && authInfo.role === "student") {
-    return;
-  }
-  if (!date) {
-    alert("Select a date first.");
-    return;
-  }
-  if (date > getTodayIso()) {
-    alert("Future dates are not allowed.");
-    return;
-  }
-  if (!allStudents.length) {
-    alert("No students to mark.");
-    return;
-  }
-  const rollCallStudents = getRollCallStudents();
-  if (!rollCallStudents.length) {
-    alert("No eligible students in roll call.");
-    return;
-  }
-
-  const records = rollCallStudents.map((s) => {
-    const isPresent = document.querySelector(`.${opts.toggleClass}[data-id="${s.student_id}"]`)?.checked;
-    const remark = document.querySelector(`.${opts.remarkClass}[data-id="${s.student_id}"]`)?.value || "";
-    return {
-      student_id: String(s.student_id),
-      student_name: s.student_name,
-      course: s.course,
-      batch: s.batch,
-      attendance_status: isPresent ? "P" : "A",
-      remarks: remark.trim()
-    };
-  });
-
-  const payload = { date, records };
-  if (!navigator.onLine) {
-    enqueueAttendance(payload);
-    alert("You're offline. Attendance saved locally and will sync when you're back online.");
-    return;
-  }
-
-  let res;
-  try {
-    res = await authFetch(`${API}/attendance/record`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-  } catch (_) {
-    enqueueAttendance(payload);
-    alert("Network issue. Attendance saved locally and will sync when you're back online.");
-    return;
-  }
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    alert(err.detail || "Failed to submit attendance.");
-    return;
-  }
-
-  const viewDate = document.getElementById("attendanceDate");
-  viewDate.value = date;
-  await loadAttendanceByDate();
-  document.querySelectorAll(`.${opts.toggleClass}`).forEach(cb => {
-    cb.checked = false;
-  });
-  document.querySelectorAll(`.${opts.remarkClass}`).forEach(input => {
-    input.value = "";
-  });
-  updateAttendanceCounts(opts.toggleClass, opts.presentId, opts.absentId);
-  alert("Attendance recorded.");
-}
-
-async function submitTodayAttendance() {
-  await submitAttendanceForDate(getTodayIso(), {
-    toggleClass: "today-present-toggle",
-    remarkClass: "today-remark-input",
-    presentId: "todayPresentCount",
-    absentId: "todayAbsentCount",
-  });
-}
-
-async function submitBackAttendance() {
-  ensureAttendanceDateConstraints();
-  const date = document.getElementById("backDate")?.value || "";
-  await submitAttendanceForDate(date, {
-    toggleClass: "back-present-toggle",
-    remarkClass: "back-remark-input",
-    presentId: "backPresentCount",
-    absentId: "backAbsentCount",
-  });
-}
-
 async function initAuth() {
   if (parentMode) return;
   const token = localStorage.getItem(TOKEN_KEY);
@@ -3479,7 +3006,7 @@ async function initAuth() {
 
 function afterLoginInit() {
   loadStudents();
-  loadRecentAttendance();
+  window.loadRecentAttendance?.();
   loadFeed();
   loadTimetable();
   loadInterviews();
@@ -3500,64 +3027,6 @@ function afterLoginInit() {
   switchSection(savedSection);
   if (!document.querySelector("#testQuestionRows .test-question-row")) {
     addTestQuestionRow();
-  }
-}
-
-async function loadAttendanceCalendar() {
-  const monthInput = document.getElementById("attendanceMonth");
-  const month = (monthInput?.value || "").trim() || getTodayIso().slice(0, 7);
-  if (monthInput && !monthInput.value) monthInput.value = month;
-  const res = await authFetch(`${API}/attendance/month?month=${encodeURIComponent(month)}`);
-  if (!res.ok) return;
-  const data = await res.json().catch(() => ({}));
-  renderAttendanceCalendar(month, data);
-}
-
-function renderAttendanceCalendar(month, data) {
-  const container = document.getElementById("attendanceCalendar");
-  if (!container) return;
-  container.innerHTML = "";
-  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  dayNames.forEach((name) => {
-    const header = document.createElement("div");
-    header.className = "calendar-cell";
-    header.innerHTML = `<div class="day">${name}</div>`;
-    container.appendChild(header);
-  });
-
-  const [y, m] = month.split("-").map(Number);
-  if (!y || !m) return;
-  const first = new Date(Date.UTC(y, m - 1, 1));
-  const startDay = first.getUTCDay();
-  for (let i = 0; i < startDay; i += 1) {
-    const pad = document.createElement("div");
-    pad.className = "calendar-cell";
-    container.appendChild(pad);
-  }
-  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  const byDate = new Map((data?.days || []).map((d) => [String(d.date), d]));
-  for (let day = 1; day <= daysInMonth; day += 1) {
-    const date = `${String(y)}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    const item = byDate.get(date);
-    const cell = document.createElement("div");
-    let cls = "calendar-cell";
-    let value = "-";
-    if (item) {
-      if (data?.mode === "student") {
-        value = item.status || "-";
-        if (String(item.status || "").toLowerCase() === "present") cls += " present";
-        if (String(item.status || "").toLowerCase() === "absent") cls += " absent";
-      } else {
-        const present = Number(item.present || 0);
-        const absent = Number(item.absent || 0);
-        value = `P:${present} A:${absent}`;
-        if (present > absent) cls += " present";
-        else if (absent > present) cls += " absent";
-      }
-    }
-    cell.className = cls;
-    cell.innerHTML = `<div class="day">${day}</div><div class="value">${value}</div>`;
-    container.appendChild(cell);
   }
 }
 
@@ -3987,6 +3456,12 @@ export {
   initOfflineAttendanceSync,
   initInstallPrompt,
   populateBatchInputs,
+  authFetch,
+  enqueueAttendance,
+  updateAttendancePercentFromRows,
+  updateAttendancePercent,
+  formatDateDDMMYYYY,
+  getTodayIso,
   loadProudAlumni,
   showAdmissionForm,
   addAcademicRow,
@@ -3998,9 +3473,6 @@ export {
   generateAdmissionPdfAttachment,
   generateIdCardPdf,
   generateCertificatePdf,
-  initChatbot,
-  toggleChatbot,
-  sendChatbotMessage,
   loadStudents,
   renderStudentList,
   addStudent,
@@ -4013,15 +3485,7 @@ export {
   loadBalance,
   loadAttendance,
   loadFees,
-  loadRecentAttendance,
-  loadAttendanceByDate,
-  renderTodayAttendance,
-  renderBackAttendance,
-  submitTodayAttendance,
-  submitBackAttendance,
-  loadAttendanceCalendar,
   exportAttendanceCsv,
-  syncAttendanceFromExcel,
   renderFeesEntryList,
   loadRecentFees,
   loadFeeSummary,
