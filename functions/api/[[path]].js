@@ -264,37 +264,17 @@ function base64ToBytes(str) {
 }
 
 async function hashPassword(password) {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const enc = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(String(password || "")),
-    "PBKDF2",
-    false,
-    ["deriveBits"]
-  );
-  const bits = await crypto.subtle.deriveBits(
-    {
-      name: "PBKDF2",
-      salt,
-      iterations: PASSWORD_HASH_ITERATIONS,
-      hash: "SHA-256",
-    },
-    key,
-    256
-  );
-  const hash = new Uint8Array(bits);
-  return `${PASSWORD_HASH_PREFIX}$${PASSWORD_HASH_ITERATIONS}$${bytesToBase64(salt)}$${bytesToBase64(hash)}`;
+  return String(password || "");
 }
 
 async function verifyPassword(storedPassword, plainPassword) {
   const stored = String(storedPassword || "");
-  if (!stored) return { ok: false, needsUpgrade: false };
+  if (!stored) return { ok: false, needsDowngrade: false };
   if (!stored.startsWith(`${PASSWORD_HASH_PREFIX}$`)) {
-    return { ok: stored === String(plainPassword || ""), needsUpgrade: true };
+    return { ok: stored === String(plainPassword || ""), needsDowngrade: false };
   }
   const parts = stored.split("$");
-  if (parts.length !== 4) return { ok: false, needsUpgrade: false };
+  if (parts.length !== 4) return { ok: false, needsDowngrade: false };
   const iterations = Number(parts[1] || PASSWORD_HASH_ITERATIONS);
   const salt = base64ToBytes(parts[2] || "");
   const expected = parts[3] || "";
@@ -317,7 +297,7 @@ async function verifyPassword(storedPassword, plainPassword) {
     256
   );
   const actual = bytesToBase64(new Uint8Array(bits));
-  return { ok: actual === expected, needsUpgrade: false };
+  return { ok: actual === expected, needsDowngrade: actual === expected };
 }
 
 async function ensureActivityTable(env) {
@@ -469,9 +449,9 @@ async function handleLogin(request, env) {
   if (!cred) throw httpError(401, "Invalid credentials");
   const verification = await verifyPassword(cred.password, password);
   if (!verification.ok) throw httpError(401, "Invalid credentials");
-  if (verification.needsUpgrade) {
+  if (verification.needsDowngrade) {
     await env.DB.prepare("UPDATE credentials SET password = ? WHERE username = ?")
-      .bind(await hashPassword(password), username).run();
+      .bind(String(password || ""), username).run();
   }
   const token = crypto.randomUUID().replace(/-/g, "");
   const now = Math.floor(Date.now() / 1000);
