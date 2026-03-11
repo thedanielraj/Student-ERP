@@ -27,6 +27,11 @@ export async function onRequest(context) {
       const session = await requireAuth(request, env);
       return await leadsList(session, env);
     }
+    if (/^leads\/\d+\/contacted$/.test(path) && method === "POST") {
+      const session = await requireAuth(request, env);
+      const id = Number(path.split("/")[1]);
+      return await leadsMarkContacted(id, session, env);
+    }
     if (path === "admissions/apply" && method === "POST") {
       return await admissionsApply(request, env);
     }
@@ -232,9 +237,22 @@ async function ensureLeadsTable(env) {
       phone TEXT,
       preferred_time TEXT,
       intent TEXT,
+      status TEXT NOT NULL DEFAULT 'new',
+      contacted_at TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`
   ).run();
+  const cols = await env.DB.prepare("PRAGMA table_info(leads)").all();
+  const existing = new Set((cols.results || []).map((c) => String(c.name || "")));
+  const alter = [
+    { name: "status", sql: "ALTER TABLE leads ADD COLUMN status TEXT NOT NULL DEFAULT 'new'" },
+    { name: "contacted_at", sql: "ALTER TABLE leads ADD COLUMN contacted_at TEXT" },
+  ];
+  for (const col of alter) {
+    if (!existing.has(col.name)) {
+      await env.DB.prepare(col.sql).run();
+    }
+  }
 }
 
 async function leadsCreate(request, env) {
@@ -261,12 +279,22 @@ async function leadsList(session, env) {
   if (!isSuperuser(session)) throw httpError(403, "Forbidden");
   await ensureLeadsTable(env);
   const rows = await env.DB.prepare(
-    `SELECT lead_id, name, age, qualification, location, phone, preferred_time, intent, created_at
+    `SELECT lead_id, name, age, qualification, location, phone, preferred_time, intent, status, contacted_at, created_at
      FROM leads
      ORDER BY lead_id DESC
      LIMIT 500`
   ).all();
   return json(rows.results || []);
+}
+
+async function leadsMarkContacted(leadId, session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  if (!leadId) throw httpError(400, "Invalid lead id");
+  await ensureLeadsTable(env);
+  await env.DB.prepare(
+    "UPDATE leads SET status = 'contacted', contacted_at = datetime('now') WHERE lead_id = ?"
+  ).bind(leadId).run();
+  return json({ status: "ok", lead_id: leadId });
 }
 
 async function writeActivity(env, session, actionType, description, payload = {}) {

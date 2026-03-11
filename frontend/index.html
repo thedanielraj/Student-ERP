@@ -856,6 +856,7 @@
           </div>
           <div class="top-actions">
             <button class="btn" onclick="loadLeads()">Refresh</button>
+            <button class="btn" onclick="exportLeadsCsv()">Export CSV</button>
           </div>
         </header>
         <section class="panel">
@@ -870,11 +871,13 @@
                 <th>Age</th>
                 <th>Intent</th>
                 <th>Preferred Time</th>
+                <th>Status</th>
+                <th>Action</th>
                 <th>Submitted</th>
               </tr>
             </thead>
             <tbody id="leadsBody">
-              <tr><td colspan="9" class="empty">No leads found</td></tr>
+              <tr><td colspan="11" class="empty">No leads found</td></tr>
             </tbody>
           </table>
         </section>
