@@ -29,3 +29,4 @@ students.loadProudAlumni();
 chatbot.initChatbot();
 parent.initParentPortal();
 auth.initAuth();
+window.__APP_READY__ = true;

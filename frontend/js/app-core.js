@@ -397,7 +397,9 @@ function formatMoney(value) {
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+    navigator.serviceWorker.getRegistrations()
+      .then((registrations) => Promise.all(registrations.map((reg) => reg.unregister())))
+      .catch(() => {});
   });
 }
 
