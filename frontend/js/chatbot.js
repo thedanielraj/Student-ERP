@@ -1,7 +1,5 @@
 import { API, chatbotState } from "./app-core.js?v=20260311b";
 
-import { API, chatbotState } from "./app-core.js?v=20260311b";
-
 function addChatbotMessage(role, text) {
   const messages = document.getElementById("chatbotMessages");
   if (!messages) return;
