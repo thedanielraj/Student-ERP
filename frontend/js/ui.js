@@ -7,5 +7,6 @@ export {
   registerServiceWorker,
   initOfflineAttendanceSync,
   initInstallPrompt,
-  populateBatchInputs
+  populateBatchInputs,
+  submitHomeInquiry
 } from "./app-core.js";

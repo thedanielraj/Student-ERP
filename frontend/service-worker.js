@@ -21,6 +21,7 @@ const APP_SHELL = [
   "/js/ui.js",
   "/js/errors.js",
   "/manifest.json",
+  "/assets/favicon.svg",
   "/assets/logo.png"
 ];
 

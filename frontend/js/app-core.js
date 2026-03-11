@@ -765,6 +765,41 @@ function showAdmissionForm() {
   }
 }
 
+async function submitHomeInquiry() {
+  const name = (document.getElementById("inquiryName")?.value || "").trim();
+  const phone = (document.getElementById("inquiryPhone")?.value || "").trim();
+  const interest = (document.getElementById("inquiryInterest")?.value || "").trim();
+
+  if (!name || !phone || !interest) {
+    alert("Please fill your name, phone number, and interest.");
+    return;
+  }
+  if (!/^\d{10}$/.test(phone)) {
+    alert("Enter a valid 10 digit phone number.");
+    return;
+  }
+
+  const res = await fetch(`${API}/leads`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name,
+      phone,
+      qualification: "",
+      location: "",
+      age: "",
+      preferred_time: "",
+      intent: `inquiry - ${interest}`,
+    }),
+  });
+  if (!(await handleApiError(res, "Unable to submit inquiry."))) return;
+
+  document.getElementById("inquiryName").value = "";
+  document.getElementById("inquiryPhone").value = "";
+  document.getElementById("inquiryInterest").value = "";
+  alert("Thanks! Our team will contact you soon.");
+}
+
 async function loadProudAlumni() {
   const homeList = document.getElementById("alumniList");
   const portalList = document.getElementById("portalAlumniList");
@@ -3464,6 +3499,7 @@ export {
   getTodayIso,
   loadProudAlumni,
   showAdmissionForm,
+  submitHomeInquiry,
   addAcademicRow,
   submitAdmissionForm,
   loadAdmissions,

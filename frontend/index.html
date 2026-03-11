@@ -5,7 +5,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Arunand's Aviation ERP</title>
+  <meta name="description" content="Arunand's Aviation Institute — aviation training for Ground Operations and Cabin Crew with admissions, attendance, and fee tracking." />
+  <meta property="og:title" content="Arunand's Aviation Institute" />
+  <meta property="og:description" content="Industry-focused aviation training with admissions, attendance, and fee tracking in one portal." />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="/assets/logo.png" />
+  <meta property="og:url" content="/" />
   <meta name="theme-color" content="#0f2f63" />
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
   <link rel="manifest" href="/manifest.json" />
   <link rel="stylesheet" href="/style.css" />
 </head>
@@ -49,12 +56,73 @@
       </section>
       <section class="panel">
         <div class="panel-header">
+          <h2>Course Catalog</h2>
+        </div>
+        <div class="course-grid">
+          <article class="course-card">
+            <h3>Ground Operations</h3>
+            <div class="course-meta">
+              <div><strong>Duration:</strong> 3 Months</div>
+              <div><strong>Eligibility:</strong> 10+2 Pass</div>
+              <div><strong>Fee:</strong> INR 1,50,000 (installments available)</div>
+            </div>
+            <p class="meta">Focus on airport operations, passenger handling, safety procedures, and airline systems.</p>
+          </article>
+          <article class="course-card">
+            <h3>Cabin Crew</h3>
+            <div class="course-meta">
+              <div><strong>Duration:</strong> 3.5 Months</div>
+              <div><strong>Eligibility:</strong> 10+2 Pass</div>
+              <div><strong>Fee:</strong> INR 1,50,000 (installments available)</div>
+            </div>
+            <p class="meta">Focus on in-flight hospitality, grooming, safety drills, and customer service excellence.</p>
+          </article>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-header">
           <h2>Proud Alumni</h2>
           <button class="btn" onclick="loadProudAlumni()">Refresh</button>
         </div>
         <ul id="alumniList" class="student-list">
           <li class="student-item"><strong>No alumni updates yet</strong></li>
         </ul>
+      </section>
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Alumni Stories</h2>
+        </div>
+        <div class="testimonial-grid">
+          <div class="testimonial-card">
+            <p class="testimonial-quote">"The ground ops training prepared me for real airport challenges from day one."</p>
+            <div class="testimonial-name">Kiran S. • Ground Staff, IndiGo</div>
+          </div>
+          <div class="testimonial-card">
+            <p class="testimonial-quote">"The grooming and safety drills gave me huge confidence during interviews."</p>
+            <div class="testimonial-name">Megha R. • Cabin Crew, AirAsia</div>
+          </div>
+          <div class="testimonial-card">
+            <p class="testimonial-quote">"Supportive trainers and practical sessions made learning fast and enjoyable."</p>
+            <div class="testimonial-name">Arjun P. • Customer Service, Bengaluru Airport</div>
+          </div>
+        </div>
+      </section>
+      <section class="panel" id="homeInquiry">
+        <div class="panel-header">
+          <h2>Contact & Inquiry</h2>
+        </div>
+        <div class="form-row inquiry-form">
+          <input id="inquiryName" placeholder="Your Name" required />
+          <input id="inquiryPhone" placeholder="Phone Number" required inputmode="numeric" pattern="\\d{10}" maxlength="10" />
+          <select id="inquiryInterest" required>
+            <option value="">Select Interest</option>
+            <option value="Ground Operations">Ground Operations</option>
+            <option value="Cabin Crew">Cabin Crew</option>
+            <option value="General Inquiry">General Inquiry</option>
+          </select>
+          <button class="btn primary" onclick="submitHomeInquiry()">Submit Inquiry</button>
+        </div>
+        <p class="hint">We will contact you within 24 hours on the number you provide.</p>
       </section>
       <section id="homeAdmission" class="panel hidden">
         <div class="panel-header">
