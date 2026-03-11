@@ -56,11 +56,14 @@ async function askChatbotAi(message) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         message,
+        intent: chatbotState.intent,
         profile: {
           name: chatbotState.profile.name,
           age: chatbotState.profile.age,
           qualification: chatbotState.profile.qualification,
           location: chatbotState.profile.location,
+          phone: chatbotState.profile.phone,
+          preferred_time: chatbotState.profile.preferred_time,
         },
       }),
     });
@@ -151,11 +154,69 @@ async function sendChatbotMessage() {
       return;
     }
     if (lower.includes("fee") || lower === "3") {
-      addChatbotMessage("bot", "Fees are INR 1.5L. We also offer installment options.\nWould you like the fee breakup?");
+      addChatbotMessage("bot", "Fees are INR 1,50,000. We also offer installment options.\nWould you like the fee breakup?");
       return;
     }
     if (lower.includes("elig") || lower === "4") {
       addChatbotMessage("bot", "Eligibility typically requires 10+2 pass and good communication skills.\nWant the detailed criteria for Ground Operations or Cabin Crew?");
+      return;
+    }
+    if (
+      lower.includes("duration") ||
+      lower.includes("how long") ||
+      lower.includes("months") ||
+      lower.includes("length")
+    ) {
+      addChatbotMessage("bot", "Ground Operations is 3 months. Cabin Crew is 3.5 months.\nWant the syllabus highlights?");
+      return;
+    }
+    if (
+      lower.includes("admission") ||
+      lower.includes("apply") ||
+      lower.includes("enroll") ||
+      lower.includes("enrol") ||
+      lower.includes("join") ||
+      lower.includes("process")
+    ) {
+      addChatbotMessage(
+        "bot",
+        "Admission is simple: fill the form, submit documents, pay the initial fee, and we confirm your batch.\nNeed help with the form?"
+      );
+      return;
+    }
+    if (lower.includes("document") || lower.includes("aadhaar") || lower.includes("marksheet") || lower.includes("id")) {
+      addChatbotMessage(
+        "bot",
+        "Documents typically include 10th/12th marksheets, Aadhaar/ID proof, and passport-size photos.\nWant a counsellor to guide you?"
+      );
+      return;
+    }
+    if (lower.includes("address") || lower.includes("location") || lower.includes("campus") || lower.includes("where")) {
+      addChatbotMessage(
+        "bot",
+        "We are based in Bangalore. Share your location and we can help with directions."
+      );
+      return;
+    }
+    if (
+      lower.includes("timing") ||
+      lower.includes("time") ||
+      lower.includes("batch") ||
+      lower.includes("schedule") ||
+      lower.includes("weekday") ||
+      lower.includes("weekend")
+    ) {
+      addChatbotMessage(
+        "bot",
+        "Batch timings vary. Tell me your preferred time and we can share the closest schedule."
+      );
+      return;
+    }
+    if (lower.includes("placement") || lower.includes("job") || lower.includes("career") || lower.includes("salary")) {
+      addChatbotMessage(
+        "bot",
+        "We provide interview prep and placement support, with guidance on airline hiring processes.\nWant to speak to a counsellor?"
+      );
       return;
     }
     if (lower.includes("counsellor") || lower.includes("counselor") || lower === "5") {

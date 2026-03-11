@@ -329,6 +329,11 @@ async function ensureLeadsTable(env) {
       phone TEXT,
       preferred_time TEXT,
       intent TEXT,
+      source TEXT,
+      last_message TEXT,
+      last_reply TEXT,
+      last_intent TEXT,
+      updated_at TEXT,
       status TEXT NOT NULL DEFAULT 'new',
       contacted_at TEXT,
       followup_date TEXT,
@@ -341,6 +346,11 @@ async function ensureLeadsTable(env) {
     { name: "status", sql: "ALTER TABLE leads ADD COLUMN status TEXT NOT NULL DEFAULT 'new'" },
     { name: "contacted_at", sql: "ALTER TABLE leads ADD COLUMN contacted_at TEXT" },
     { name: "followup_date", sql: "ALTER TABLE leads ADD COLUMN followup_date TEXT" },
+    { name: "source", sql: "ALTER TABLE leads ADD COLUMN source TEXT" },
+    { name: "last_message", sql: "ALTER TABLE leads ADD COLUMN last_message TEXT" },
+    { name: "last_reply", sql: "ALTER TABLE leads ADD COLUMN last_reply TEXT" },
+    { name: "last_intent", sql: "ALTER TABLE leads ADD COLUMN last_intent TEXT" },
+    { name: "updated_at", sql: "ALTER TABLE leads ADD COLUMN updated_at TEXT" },
   ];
   for (const col of alter) {
     if (!existing.has(col.name)) {
@@ -363,16 +373,85 @@ async function leadsCreate(request, env) {
     throw httpError(400, "Phone number must be a 10 digit number.");
   }
   await env.DB.prepare(
-    `INSERT INTO leads (name, age, qualification, location, phone, preferred_time, intent)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO leads (name, age, qualification, location, phone, preferred_time, intent, source, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'inquiry', datetime('now'))`
   ).bind(name, age, qualification, location, phoneRaw, preferredTime, intent).run();
   return json({ status: "ok", message: "Lead captured" });
+}
+
+async function recordChatbotLead(message, reply, profile, intent, env) {
+  await ensureLeadsTable(env);
+  const name = String(profile.name || "").trim();
+  const age = String(profile.age || "").trim();
+  const qualification = String(profile.qualification || "").trim();
+  const location = String(profile.location || "").trim();
+  const phoneRaw = String(profile.phone || "").replace(/\D/g, "");
+  const preferredTime = String(profile.preferred_time || "").trim();
+  const validPhone = /^\d{10}$/.test(phoneRaw) ? phoneRaw : "";
+  const safeName = name || null;
+  const safeAge = age || null;
+  const safeQualification = qualification || null;
+  const safeLocation = location || null;
+  const safeIntent = String(intent || "").trim() || null;
+
+  if (validPhone) {
+    const existing = await env.DB.prepare(
+      "SELECT lead_id FROM leads WHERE phone = ? ORDER BY lead_id DESC LIMIT 1"
+    ).bind(validPhone).first();
+    if (existing?.lead_id) {
+      await env.DB.prepare(
+        `UPDATE leads
+         SET name = COALESCE(?, name),
+             age = COALESCE(?, age),
+             qualification = COALESCE(?, qualification),
+             location = COALESCE(?, location),
+             preferred_time = COALESCE(?, preferred_time),
+             intent = COALESCE(?, intent),
+             source = 'chatbot',
+             last_message = ?,
+             last_reply = ?,
+             last_intent = ?,
+             updated_at = datetime('now')
+         WHERE lead_id = ?`
+      ).bind(
+        safeName,
+        safeAge,
+        safeQualification,
+        safeLocation,
+        preferredTime || null,
+        safeIntent,
+        message,
+        reply,
+        safeIntent,
+        existing.lead_id
+      ).run();
+      return;
+    }
+  }
+
+  await env.DB.prepare(
+    `INSERT INTO leads
+      (name, age, qualification, location, phone, preferred_time, intent, source, last_message, last_reply, last_intent, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'chatbot', ?, ?, ?, datetime('now'))`
+  ).bind(
+    safeName,
+    safeAge,
+    safeQualification,
+    safeLocation,
+    validPhone || null,
+    preferredTime || null,
+    safeIntent,
+    message,
+    reply,
+    safeIntent
+  ).run();
 }
 
 async function chatbotAsk(request, env) {
   const body = await request.json().catch(() => ({}));
   const message = String(body.message || "").trim();
   const profile = body.profile && typeof body.profile === "object" ? body.profile : {};
+  const intent = String(body.intent || "").trim();
   if (!message) throw httpError(400, "Message is required.");
   if (!env.AI || typeof env.AI.run !== "function") {
     throw httpError(503, "AI is not configured.");
@@ -393,8 +472,11 @@ async function chatbotAsk(request, env) {
     "You are the official chatbot for Arunand's Aviation Institute in Bangalore. " +
     "Be warm, concise, and professional. " +
     "If asked about fees, use INR 1,50,000 (1.5 lakh) as the total fee. " +
-    "Courses: Ground Operations and Cabin Crew. " +
-    "Eligibility is typically 10+2, but confirm based on course. " +
+    "Courses: Ground Operations (3 months) and Cabin Crew (3.5 months). " +
+    "Eligibility is typically 10+2 pass. " +
+    "The institute is based in Bangalore. " +
+    "For documents, mention 10th/12th marksheets, Aadhaar/ID, and passport photos. " +
+    "For schedules or batches, say timings vary and offer a counsellor callback. " +
     "If the user wants to talk to a counsellor, ask for their phone number and preferred time. " +
     "Do not make promises about discounts or admissions; invite them to share details for follow-up.";
 
@@ -412,6 +494,7 @@ async function chatbotAsk(request, env) {
   }
   const reply = String(response?.response || response?.result?.response || response?.text || "").trim();
   if (!reply) throw httpError(502, "AI did not return a response.");
+  await recordChatbotLead(message, reply, profile, intent, env);
   return json({ reply });
 }
 
@@ -419,7 +502,7 @@ async function leadsList(session, env) {
   if (!isSuperuser(session)) throw httpError(403, "Forbidden");
   await ensureLeadsTable(env);
   const rows = await env.DB.prepare(
-    `SELECT lead_id, name, age, qualification, location, phone, preferred_time, intent, status, contacted_at, followup_date, created_at
+    `SELECT lead_id, name, age, qualification, location, phone, preferred_time, intent, source, last_message, last_reply, last_intent, updated_at, status, contacted_at, followup_date, created_at
      FROM leads
      ORDER BY lead_id DESC
      LIMIT 500`
