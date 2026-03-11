@@ -1,4 +1,5 @@
 import { handleApiError } from "./errors.js";
+import { handleApiError } from "./errors.js";
 
 const LOCAL_FASTAPI_HOSTS = ["127.0.0.1:8000", "localhost:8000"];
 export const API = LOCAL_FASTAPI_HOSTS.includes(window.location.host)
