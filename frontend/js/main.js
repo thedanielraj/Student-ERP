@@ -1,5 +1,6 @@
 import * as auth from "./auth.js";
 import * as students from "./students.js";
+import * as auth from "./auth.js";
 import * as attendance from "./attendance.js";
 import * as fees from "./fees.js";
 import * as tests from "./tests.js";
