@@ -1,9 +1,10 @@
 import { handleApiError } from "./errors.js";
 
 const LOCAL_FASTAPI_HOSTS = ["127.0.0.1:8000", "localhost:8000"];
-export const API = LOCAL_FASTAPI_HOSTS.includes(window.location.host)
+var API = LOCAL_FASTAPI_HOSTS.includes(window.location.host)
   ? window.location.origin
   : `${window.location.origin}/api`;
+export { API };
 export const TOKEN_KEY = "authToken";
 const ATTENDANCE_QUEUE_KEY = "offlineAttendanceQueue";
 const INSTALL_DISMISS_KEY = "installBannerDismissedUntil";
