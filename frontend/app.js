@@ -25,7 +25,8 @@ let admissionsCache = [];
 let chatbotState = {
   initialized: false,
   step: "greeting",
-  profile: { name: "", age: "", qualification: "", location: "" },
+  intent: "",
+  profile: { name: "", age: "", qualification: "", location: "", phone: "", preferred_time: "" },
 };
 let currentAttempt = null;
 let currentAttemptQuestions = [];
@@ -446,7 +447,36 @@ function addChatbotMessage(role, text) {
   messages.scrollTop = messages.scrollHeight;
 }
 
-function sendChatbotMessage() {
+function extractPhoneNumber(text) {
+  const digits = String(text || "").replace(/\D/g, "");
+  return /^\d{10}$/.test(digits) ? digits : "";
+}
+
+async function submitChatbotLead() {
+  const payload = {
+    name: chatbotState.profile.name,
+    age: chatbotState.profile.age,
+    qualification: chatbotState.profile.qualification,
+    location: chatbotState.profile.location,
+    phone: chatbotState.profile.phone,
+    preferred_time: chatbotState.profile.preferred_time,
+    intent: chatbotState.intent,
+  };
+  const res = await fetch(`${API}/leads`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    addChatbotMessage("bot", err.detail || "Sorry, I could not save your details. Please try again.");
+    return false;
+  }
+  addChatbotMessage("bot", "Thanks! Our team will contact you soon.");
+  return true;
+}
+
+async function sendChatbotMessage() {
   const input = document.getElementById("chatbotInput");
   const text = String(input?.value || "").trim();
   if (!text) return;
@@ -487,10 +517,41 @@ function sendChatbotMessage() {
     return;
   }
 
+  if (chatbotState.step === "ask_phone") {
+    const phone = extractPhoneNumber(text);
+    if (!phone) {
+      addChatbotMessage("bot", "Please share a valid 10 digit phone number.");
+      return;
+    }
+    chatbotState.profile.phone = phone;
+    chatbotState.step = "ask_time";
+    addChatbotMessage("bot", "Thanks. What is your preferred time to receive a call?");
+    return;
+  }
+
+  if (chatbotState.step === "ask_time") {
+    chatbotState.profile.preferred_time = text;
+    const ok = await submitChatbotLead();
+    if (ok) {
+      chatbotState.step = "menu";
+      addChatbotMessage("bot", "Anything else I can help you with? You can type 1-6 or say 'fees', 'courses', etc.");
+    }
+    return;
+  }
+
   if (chatbotState.step === "menu") {
     const choice = text.replace(/[^\d]/g, "");
+    const phoneInline = extractPhoneNumber(text);
     if (choice === "1" || /register|details/.test(lower)) {
-      addChatbotMessage("bot", "Please confirm your phone number and preferred time to call.");
+      chatbotState.intent = "register";
+      chatbotState.step = "ask_phone";
+      if (phoneInline) {
+        chatbotState.profile.phone = phoneInline;
+        chatbotState.step = "ask_time";
+        addChatbotMessage("bot", "Thanks. What is your preferred time to receive a call?");
+        return;
+      }
+      addChatbotMessage("bot", "Please share your 10 digit phone number.");
       return;
     }
     if (choice === "2" || /course|courses/.test(lower)) {
@@ -506,11 +567,27 @@ function sendChatbotMessage() {
       return;
     }
     if (choice === "5" || /counsellor|counselor|call|talk/.test(lower)) {
-      addChatbotMessage("bot", "Sure. Please share your phone number and preferred time, and our counsellor will reach out.");
+      chatbotState.intent = "counsellor";
+      chatbotState.step = "ask_phone";
+      if (phoneInline) {
+        chatbotState.profile.phone = phoneInline;
+        chatbotState.step = "ask_time";
+        addChatbotMessage("bot", "Thanks. What is your preferred time to receive a call?");
+        return;
+      }
+      addChatbotMessage("bot", "Sure. Please share your 10 digit phone number.");
       return;
     }
     if (choice === "6" || /offer|offers|discount|new year|christmas/.test(lower)) {
-      addChatbotMessage("bot", "We have seasonal offers. Please share your phone number and we will send the latest offer details.");
+      chatbotState.intent = "offers";
+      chatbotState.step = "ask_phone";
+      if (phoneInline) {
+        chatbotState.profile.phone = phoneInline;
+        chatbotState.step = "ask_time";
+        addChatbotMessage("bot", "Thanks. What is your preferred time to receive a call?");
+        return;
+      }
+      addChatbotMessage("bot", "We have seasonal offers. Please share your 10 digit phone number.");
       return;
     }
     addChatbotMessage("bot", "You can type a number (1-6) or say things like 'fees', 'courses', or 'talk to counsellor'.");

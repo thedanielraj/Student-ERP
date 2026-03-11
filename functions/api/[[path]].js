@@ -20,6 +20,9 @@ export async function onRequest(context) {
     if (path === "public/alumni" && method === "GET") {
       return publicAlumni(env);
     }
+    if (path === "leads" && method === "POST") {
+      return await leadsCreate(request, env);
+    }
     if (path === "admissions/apply" && method === "POST") {
       return await admissionsApply(request, env);
     }
@@ -212,6 +215,42 @@ async function ensureActivityTable(env) {
       undone_at TEXT
     )`
   ).run();
+}
+
+async function ensureLeadsTable(env) {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS leads (
+      lead_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      age TEXT,
+      qualification TEXT,
+      location TEXT,
+      phone TEXT,
+      preferred_time TEXT,
+      intent TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`
+  ).run();
+}
+
+async function leadsCreate(request, env) {
+  await ensureLeadsTable(env);
+  const body = await request.json().catch(() => ({}));
+  const name = String(body.name || "").trim();
+  const age = String(body.age || "").trim();
+  const qualification = String(body.qualification || "").trim();
+  const location = String(body.location || "").trim();
+  const phoneRaw = String(body.phone || "").replace(/\D/g, "");
+  const preferredTime = String(body.preferred_time || "").trim();
+  const intent = String(body.intent || "").trim();
+  if (!phoneRaw || !/^\d{10}$/.test(phoneRaw)) {
+    throw httpError(400, "Phone number must be a 10 digit number.");
+  }
+  await env.DB.prepare(
+    `INSERT INTO leads (name, age, qualification, location, phone, preferred_time, intent)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).bind(name, age, qualification, location, phoneRaw, preferredTime, intent).run();
+  return json({ status: "ok", message: "Lead captured" });
 }
 
 async function writeActivity(env, session, actionType, description, payload = {}) {
