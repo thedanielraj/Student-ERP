@@ -9,4 +9,5 @@ export {
   initInstallPrompt,
   populateBatchInputs,
   submitHomeInquiry
-} from "./app-core.js";
+} from "./app-core.js?v=20260311";
+

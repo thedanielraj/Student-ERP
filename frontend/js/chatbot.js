@@ -1,6 +1,6 @@
-import { API, chatbotState } from "./app-core.js";
+import { API, chatbotState } from "./app-core.js?v=20260311";
 
-import { API, chatbotState } from "./app-core.js";
+import { API, chatbotState } from "./app-core.js?v=20260311";
 
 function addChatbotMessage(role, text) {
   const messages = document.getElementById("chatbotMessages");
@@ -270,3 +270,4 @@ function initChatbot() {
 }
 
 export { initChatbot, toggleChatbot, sendChatbotMessage };
+

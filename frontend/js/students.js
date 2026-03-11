@@ -12,4 +12,5 @@ export {
   loadAttendance,
   loadFees,
   loadProudAlumni
-} from "./app-core.js";
+} from "./app-core.js?v=20260311";
+

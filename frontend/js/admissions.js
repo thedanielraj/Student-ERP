@@ -6,4 +6,5 @@ export {
   deleteAdmission,
   regenerateAdmissionPdfs,
   openAdmissionPdf
-} from "./app-core.js";
+} from "./app-core.js?v=20260311";
+
