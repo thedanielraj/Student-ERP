@@ -1183,7 +1183,7 @@
   </script>
   <div id="bootError" class="boot-error hidden" role="alert"></div>
   <script type="module">
-    import("/js/main.js?v=20260311")
+    import(`/js/main.js?v=${Date.now()}`)
       .then(() => { window.__APP_READY__ = true; })
       .catch((err) => {
         const message = err && err.message ? err.message : "Failed to load app scripts.";
