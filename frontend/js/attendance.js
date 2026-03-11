@@ -44,20 +44,20 @@ function renderAttendanceForm(date, opts) {
   }
 
   if (date > getTodayIso()) {
-    body.innerHTML = `<tr><td colspan="4" class="empty">Future dates are not allowed</td></tr>`;
+    body.innerHTML = `<tr><td colspan="5" class="empty">Future dates are not allowed</td></tr>`;
     updateAttendanceCounts(toggleClass, presentId, absentId);
     return;
   }
 
   if (!allStudents.length) {
-    body.innerHTML = `<tr><td colspan="4" class="empty">No students found</td></tr>`;
+    body.innerHTML = `<tr><td colspan="5" class="empty">No students found</td></tr>`;
     updateAttendanceCounts(toggleClass, presentId, absentId);
     return;
   }
 
   const rollCallStudents = getRollCallStudents();
   if (!rollCallStudents.length) {
-    body.innerHTML = `<tr><td colspan="4" class="empty">${emptyMsg}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="5" class="empty">${emptyMsg}</td></tr>`;
     updateAttendanceCounts(toggleClass, presentId, absentId);
     return;
   }
