@@ -22,6 +22,11 @@ let announcementPollTimer = null;
 let latestAnnouncementIdSeen = Number(localStorage.getItem("latestAnnouncementIdSeen") || 0);
 let announcementsNotifierBootstrapped = false;
 let admissionsCache = [];
+let leadsState = {
+  cache: [],
+  statusFilter: "all",
+  upcomingOnly: false,
+};
 let chatbotState = {
   initialized: false,
   step: "greeting",
@@ -1776,6 +1781,35 @@ async function loadLeads() {
     return;
   }
   const rows = await res.json();
+  leadsState.cache = Array.isArray(rows) ? rows : [];
+  applyLeadsFilters();
+}
+
+function applyLeadsFilters() {
+  const statusSelect = document.getElementById("leadsStatusFilter");
+  if (statusSelect) {
+    leadsState.statusFilter = statusSelect.value || "all";
+  }
+  const filtered = leadsState.cache.filter((r) => {
+    const status = String(r.status || "new");
+    if (leadsState.statusFilter !== "all" && status !== leadsState.statusFilter) return false;
+    if (leadsState.upcomingOnly) {
+      const date = String(r.followup_date || "").trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+      const today = getTodayIso();
+      const max = addDaysIso(today, 7);
+      if (date < today || date > max) return false;
+    }
+    return true;
+  });
+  renderLeadsTable(filtered);
+  const btn = document.getElementById("leadsUpcomingBtn");
+  if (btn) btn.classList.toggle("primary", leadsState.upcomingOnly);
+}
+
+function renderLeadsTable(rows) {
+  const body = document.getElementById("leadsBody");
+  if (!body) return;
   body.innerHTML = "";
   if (!rows.length) {
     body.innerHTML = `<tr><td colspan="12" class="empty">No leads found</td></tr>`;
@@ -1856,6 +1890,18 @@ async function loadLeads() {
     });
     body.appendChild(tr);
   });
+}
+
+function toggleLeadsUpcoming() {
+  leadsState.upcomingOnly = !leadsState.upcomingOnly;
+  applyLeadsFilters();
+}
+
+function addDaysIso(iso, days) {
+  const base = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(base.getTime())) return iso;
+  base.setUTCDate(base.getUTCDate() + Number(days || 0));
+  return base.toISOString().slice(0, 10);
 }
 
 function exportLeadsCsv() {

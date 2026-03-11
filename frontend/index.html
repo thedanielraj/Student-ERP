@@ -857,6 +857,13 @@
           <div class="top-actions">
             <button class="btn" onclick="loadLeads()">Refresh</button>
             <button class="btn" onclick="exportLeadsCsv()">Export CSV</button>
+            <select id="leadsStatusFilter" class="fee-input" onchange="applyLeadsFilters()">
+              <option value="all">All Statuses</option>
+              <option value="new">New</option>
+              <option value="contacted">Contacted</option>
+              <option value="not_interested">Not Interested</option>
+            </select>
+            <button id="leadsUpcomingBtn" class="btn" onclick="toggleLeadsUpcoming()">Next 7 days</button>
           </div>
         </header>
         <section class="panel">
