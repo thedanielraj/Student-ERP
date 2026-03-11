@@ -1,4 +1,4 @@
-import { API, authInfo, allStudents, alumniSelectedIds, authFetch, formatDateDDMMYYYY, getTodayIso, updateAttendancePercentFromRows, updateAttendancePercent, enqueueAttendance } from "./app-core.js?v=20260311";
+import { API, authInfo, allStudents, alumniSelectedIds, authFetch, formatDateDDMMYYYY, getTodayIso, updateAttendancePercentFromRows, updateAttendancePercent, enqueueAttendance } from "./app-core.js?v=20260311b";
 
 function ensureAttendanceDateConstraints() {
   const today = getTodayIso();
@@ -359,4 +359,5 @@ export {
   loadAttendanceCalendar,
   renderAttendanceCalendar,
 };
+
 
