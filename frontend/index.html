@@ -64,18 +64,18 @@
           <h2>Student Details</h2>
         </div>
         <div class="form-row">
-          <input id="admissionFirstName" placeholder="First Name" />
+          <input id="admissionFirstName" placeholder="First Name" required />
           <input id="admissionMiddleName" placeholder="Middle Name" />
-          <input id="admissionLastName" placeholder="Last Name" />
-          <input id="admissionPhone" placeholder="Mobile Number" />
-          <input id="admissionEmail" placeholder="Email ID" />
-          <input id="admissionBloodGroup" placeholder="Blood Group" />
-          <input id="admissionAge" type="number" min="1" placeholder="Age" />
-          <input id="admissionDob" type="date" placeholder="Date Of Birth" />
-          <input id="admissionAadhaar" placeholder="Aadhaar Number" />
-          <input id="admissionNationality" placeholder="Nationality" />
+          <input id="admissionLastName" placeholder="Last Name" required />
+          <input id="admissionPhone" placeholder="Mobile Number" required inputmode="numeric" pattern="\\d{10}" maxlength="10" />
+          <input id="admissionEmail" placeholder="Email ID" type="email" required />
+          <input id="admissionBloodGroup" placeholder="Blood Group" required />
+          <input id="admissionAge" type="number" min="1" placeholder="Age" required />
+          <input id="admissionDob" type="date" placeholder="Date Of Birth" required />
+          <input id="admissionAadhaar" placeholder="Aadhaar Number" required inputmode="numeric" pattern="\\d{12}" maxlength="12" />
+          <input id="admissionNationality" placeholder="Nationality" required />
           <input id="admissionPhoto" type="file" accept="image/*" />
-          <select id="admissionCourse">
+          <select id="admissionCourse" required>
             <option value="">Select Course</option>
             <option value="Ground Operations">Ground Operations</option>
             <option value="Cabin Crew">Cabin Crew</option>
@@ -86,28 +86,28 @@
           <h2>Father Details</h2>
         </div>
         <div class="form-row">
-          <input id="fatherName" placeholder="Father Name" />
-          <input id="fatherPhone" placeholder="Father Mobile Number" />
-          <input id="fatherOccupation" placeholder="Father Occupation" />
-          <input id="fatherEmail" placeholder="Father Email ID" />
+          <input id="fatherName" placeholder="Father Name" required />
+          <input id="fatherPhone" placeholder="Father Mobile Number" required inputmode="numeric" pattern="\\d{10}" maxlength="10" />
+          <input id="fatherOccupation" placeholder="Father Occupation" required />
+          <input id="fatherEmail" placeholder="Father Email ID" type="email" />
         </div>
 
         <div class="panel-header">
           <h2>Mother Details</h2>
         </div>
         <div class="form-row">
-          <input id="motherName" placeholder="Mother Name" />
-          <input id="motherPhone" placeholder="Mother Mobile Number" />
-          <input id="motherOccupation" placeholder="Mother Occupation" />
-          <input id="motherEmail" placeholder="Mother Email ID" />
+          <input id="motherName" placeholder="Mother Name" required />
+          <input id="motherPhone" placeholder="Mother Mobile Number" required inputmode="numeric" pattern="\\d{10}" maxlength="10" />
+          <input id="motherOccupation" placeholder="Mother Occupation" required />
+          <input id="motherEmail" placeholder="Mother Email ID" type="email" />
         </div>
 
         <div class="panel-header">
           <h2>Address Details</h2>
         </div>
         <div class="form-row">
-          <input id="correspondenceAddress" placeholder="Address For Correspondence" />
-          <input id="permanentAddress" placeholder="Permanent Address" />
+          <input id="correspondenceAddress" placeholder="Address For Correspondence" required />
+          <input id="permanentAddress" placeholder="Permanent Address" required />
         </div>
 
         <div class="panel-header">
@@ -1106,7 +1106,7 @@
 
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdf-lib/dist/pdf-lib.min.js"></script>
-  <script src="/app.js"></script>
+  <script type="module" src="/js/main.js"></script>
   <div id="offlineStatus" class="offline-status hidden"></div>
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   <div id="installBanner" class="install-banner hidden" role="dialog" aria-live="polite">

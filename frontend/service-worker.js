@@ -1,9 +1,26 @@
-const CACHE_NAME = "aai-erp-v1";
+const CACHE_NAME = "aai-erp-v2";
 const APP_SHELL = [
   "/",
   "/index.html",
   "/style.css",
-  "/app.js",
+  "/js/main.js",
+  "/js/app-core.js",
+  "/js/auth.js",
+  "/js/students.js",
+  "/js/attendance.js",
+  "/js/fees.js",
+  "/js/tests.js",
+  "/js/chatbot.js",
+  "/js/pdf.js",
+  "/js/admissions.js",
+  "/js/content.js",
+  "/js/leads.js",
+  "/js/reports.js",
+  "/js/activity.js",
+  "/js/parent.js",
+  "/js/ui.js",
+  "/js/errors.js",
+  "/js/state.js",
   "/manifest.json",
   "/assets/logo.png"
 ];

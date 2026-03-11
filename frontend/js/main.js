@@ -1,0 +1,31 @@
+import * as auth from "./auth.js";
+import * as students from "./students.js";
+import * as attendance from "./attendance.js";
+import * as fees from "./fees.js";
+import * as tests from "./tests.js";
+import * as chatbot from "./chatbot.js";
+import * as pdf from "./pdf.js";
+import * as admissions from "./admissions.js";
+import * as content from "./content.js";
+import * as leads from "./leads.js";
+import * as reports from "./reports.js";
+import * as activity from "./activity.js";
+import * as parent from "./parent.js";
+import * as ui from "./ui.js";
+import { renderStudentList } from "./students.js";
+
+Object.assign(window, auth, students, attendance, fees, tests, chatbot, pdf, admissions, content, leads, reports, activity, parent, ui);
+
+document.getElementById("search")?.addEventListener("input", renderStudentList);
+ui.populateBatchInputs();
+ui.setupTabs();
+ui.setupSidebarNav();
+ui.setupGlobalSearch();
+ui.registerServiceWorker();
+ui.initOfflineAttendanceSync();
+ui.initInstallPrompt();
+ui.initSidebarUX();
+students.loadProudAlumni();
+chatbot.initChatbot();
+parent.initParentPortal();
+auth.initAuth();
