@@ -784,6 +784,21 @@ function renderAlumniError(list) {
   list.innerHTML = `<li class="student-item"><strong>Unable to load alumni right now</strong></li>`;
 }
 
+async function readFileAsBytes(file) {
+  if (!file) return null;
+  const buffer = await file.arrayBuffer();
+  return new Uint8Array(buffer);
+}
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
 async function submitAdmissionForm() {
   const firstName = (document.getElementById("admissionFirstName")?.value || "").trim();
   const middleName = (document.getElementById("admissionMiddleName")?.value || "").trim();
@@ -845,7 +860,22 @@ async function submitAdmissionForm() {
   };
 
   try {
-    const pdfAttachment = await generateAdmissionPdfAttachment(payload);
+    const photoFile = document.getElementById("admissionPhoto")?.files?.[0] || null;
+    let photoBytes = null;
+    if (photoFile) {
+      photoBytes = await readFileAsBytes(photoFile);
+      if (photoBytes && photoBytes.length > 1024 * 1024) {
+        throw new Error("Admission photo must be less than 1 MB.");
+      }
+      payload.admission_photo_base64 = photoBytes ? bytesToBase64(photoBytes) : "";
+      payload.admission_photo_filename = photoFile.name || "photo.jpg";
+      payload.admission_photo_type = photoFile.type || "image/jpeg";
+    }
+
+    const pdfAttachment = await generateAdmissionPdfAttachment({
+      ...payload,
+      admission_photo_bytes: photoBytes,
+    });
     if (pdfAttachment) {
       payload.admission_pdf_base64 = pdfAttachment.base64;
       payload.admission_pdf_filename = pdfAttachment.filename;
@@ -873,6 +903,7 @@ async function submitAdmissionForm() {
     document.getElementById("admissionAadhaar").value = "";
     document.getElementById("admissionNationality").value = "";
     document.getElementById("admissionCourse").value = "";
+    document.getElementById("admissionPhoto").value = "";
     document.getElementById("fatherName").value = "";
     document.getElementById("fatherPhone").value = "";
     document.getElementById("fatherOccupation").value = "";
@@ -914,6 +945,9 @@ async function generateAdmissionPdfAttachment(payload) {
   let logoImage = null;
   let logoWidth = 0;
   let logoHeight = 0;
+  let photoImage = null;
+  let photoWidth = 0;
+  let photoHeight = 0;
 
   const wrapText = (value, maxWidth, useFont, size) => {
     const words = String(value || "-").split(/\s+/).filter(Boolean);
@@ -964,6 +998,23 @@ async function generateAdmissionPdfAttachment(payload) {
     logoImage = null;
     logoWidth = 0;
     logoHeight = 0;
+  }
+
+  if (payload?.admission_photo_bytes && payload.admission_photo_bytes.length) {
+    try {
+      const type = String(payload.admission_photo_type || "").toLowerCase();
+      if (type.includes("png")) {
+        photoImage = await doc.embedPng(payload.admission_photo_bytes);
+      } else {
+        photoImage = await doc.embedJpg(payload.admission_photo_bytes);
+      }
+      photoWidth = photoImage.width;
+      photoHeight = photoImage.height;
+    } catch (_) {
+      photoImage = null;
+      photoWidth = 0;
+      photoHeight = 0;
+    }
   }
 
   const drawAdmissionFormPage = (copyLabel) => {
@@ -1035,6 +1086,17 @@ async function generateAdmissionPdfAttachment(payload) {
       font,
       color: muted,
     });
+    if (photoImage && photoWidth && photoHeight) {
+      const pad = 6;
+      const maxW = photoW - pad * 2;
+      const maxH = photoH - pad * 2;
+      const scale = Math.min(maxW / photoWidth, maxH / photoHeight);
+      const drawW = photoWidth * scale;
+      const drawH = photoHeight * scale;
+      const drawX = photoX + (photoW - drawW) / 2;
+      const drawY = photoY + (photoH - drawH) / 2;
+      page.drawImage(photoImage, { x: drawX, y: drawY, width: drawW, height: drawH });
+    }
 
     let y = 660;
     y = drawSectionTitle(page, "Applicant Details", y);
@@ -1120,6 +1182,116 @@ async function generateAdmissionPdfAttachment(payload) {
   const base64 = btoa(binary);
   const filename = `admission_${payload.first_name}_${payload.last_name}_${Date.now()}.pdf`.replace(/\s+/g, "_");
   return { base64, filename, bytes };
+}
+
+async function fetchAdmissionPhotoBytes(admissionId) {
+  if (!admissionId) return null;
+  const res = await authFetch(`${API}/admissions/${admissionId}/photo`);
+  if (!res.ok) return null;
+  const buf = await res.arrayBuffer();
+  return { bytes: new Uint8Array(buf), type: res.headers.get("content-type") || "image/jpeg" };
+}
+
+async function generateIdCardPdf(admission) {
+  if (!window.PDFLib || !admission) return;
+  const { PDFDocument, StandardFonts, rgb } = window.PDFLib;
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([260, 165]);
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const accent = rgb(0.06, 0.27, 0.5);
+
+  page.drawRectangle({ x: 6, y: 6, width: 248, height: 153, borderColor: accent, borderWidth: 1 });
+  try {
+    const logoRes = await fetch("/assets/logo.png");
+    const logoBytes = await logoRes.arrayBuffer();
+    const logo = await pdfDoc.embedPng(logoBytes);
+    const scale = 40 / logo.width;
+    page.drawImage(logo, { x: 12, y: 118, width: logo.width * scale, height: logo.height * scale });
+  } catch (_) {
+    // no-op
+  }
+
+  page.drawText("Arunand's Aviation Institute", { x: 60, y: 135, size: 10, font: bold, color: accent });
+  page.drawText("Student ID Card", { x: 60, y: 122, size: 9, font, color: accent });
+
+  const photoBox = { x: 14, y: 40, w: 60, h: 70 };
+  page.drawRectangle({ x: photoBox.x, y: photoBox.y, width: photoBox.w, height: photoBox.h, borderColor: accent, borderWidth: 0.8 });
+  const photo = await fetchAdmissionPhotoBytes(Number(admission.admission_id || 0));
+  if (photo && photo.bytes?.length) {
+    try {
+      const img = photo.type.includes("png")
+        ? await pdfDoc.embedPng(photo.bytes)
+        : await pdfDoc.embedJpg(photo.bytes);
+      const scale = Math.min(photoBox.w / img.width, photoBox.h / img.height);
+      const drawW = img.width * scale;
+      const drawH = img.height * scale;
+      page.drawImage(img, {
+        x: photoBox.x + (photoBox.w - drawW) / 2,
+        y: photoBox.y + (photoBox.h - drawH) / 2,
+        width: drawW,
+        height: drawH,
+      });
+    } catch (_) {
+      // no-op
+    }
+  }
+
+  const x = 82;
+  let y = 100;
+  const line = (label, value) => {
+    page.drawText(`${label}:`, { x, y, size: 8, font: bold, color: accent });
+    page.drawText(String(value || "-"), { x: x + 48, y, size: 8, font, color: rgb(0.1, 0.1, 0.1) });
+    y -= 12;
+  };
+  line("Name", admission.full_name || "-");
+  line("Course", admission.course || "-");
+  line("Phone", admission.phone || "-");
+  line("ID", admission.admission_id || "-");
+
+  const bytes = await pdfDoc.save();
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `id_card_${admission.admission_id || "student"}.pdf`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+async function generateCertificatePdf(admission) {
+  if (!window.PDFLib || !admission) return;
+  const { PDFDocument, StandardFonts, rgb } = window.PDFLib;
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595, 842]);
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const accent = rgb(0.06, 0.27, 0.5);
+
+  page.drawRectangle({ x: 30, y: 30, width: 535, height: 782, borderColor: accent, borderWidth: 1.2 });
+  try {
+    const logoRes = await fetch("/assets/logo.png");
+    const logoBytes = await logoRes.arrayBuffer();
+    const logo = await pdfDoc.embedPng(logoBytes);
+    const scale = 120 / logo.width;
+    page.drawImage(logo, { x: 42, y: 740, width: logo.width * scale, height: logo.height * scale });
+  } catch (_) {
+    // no-op
+  }
+  page.drawText("Certificate of Completion", { x: 160, y: 700, size: 24, font: bold, color: accent });
+  page.drawText("This is to certify that", { x: 210, y: 640, size: 14, font, color: rgb(0.2, 0.2, 0.2) });
+  page.drawText(String(admission.full_name || "-"), { x: 160, y: 610, size: 22, font: bold, color: accent });
+  page.drawText(`has successfully completed the ${admission.course || "course"}.`, { x: 150, y: 570, size: 14, font, color: rgb(0.2, 0.2, 0.2) });
+  page.drawText(`Date: ${formatDateDDMMYYYY(getTodayIso())}`, { x: 42, y: 120, size: 12, font, color: rgb(0.2, 0.2, 0.2) });
+  page.drawText("Authorized Signature", { x: 400, y: 120, size: 12, font: bold, color: accent });
+  page.drawLine({ start: { x: 400, y: 110 }, end: { x: 540, y: 110 }, thickness: 1, color: accent });
+
+  const bytes = await pdfDoc.save();
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `certificate_${admission.admission_id || "student"}.pdf`;
+  link.click();
+  URL.revokeObjectURL(link.href);
 }
 
 function addAcademicRow() {
@@ -1754,7 +1926,11 @@ async function loadAdmissions() {
       <td>${r.email || "-"}</td>
       <td>${formatDateTime(r.created_at || "")}</td>
       <td>${hasPdf ? `<button class="btn" data-id="${r.admission_id}">View PDF</button>` : "-"}</td>
-      <td><button class="btn" data-delete-id="${r.admission_id}">Delete</button></td>
+      <td>
+        <button class="btn" data-delete-id="${r.admission_id}">Delete</button>
+        <button class="btn" data-id-card="${r.admission_id}">ID Card</button>
+        <button class="btn" data-cert="${r.admission_id}">Certificate</button>
+      </td>
     `;
     const btn = tr.querySelector("button[data-id]");
     if (btn) {
@@ -1766,6 +1942,18 @@ async function loadAdmissions() {
     if (deleteBtn) {
       deleteBtn.addEventListener("click", async () => {
         await deleteAdmission(Number(r.admission_id), r.full_name || "");
+      });
+    }
+    const idBtn = tr.querySelector("button[data-id-card]");
+    if (idBtn) {
+      idBtn.addEventListener("click", async () => {
+        await generateIdCardPdf(r);
+      });
+    }
+    const certBtn = tr.querySelector("button[data-cert]");
+    if (certBtn) {
+      certBtn.addEventListener("click", async () => {
+        await generateCertificatePdf(r);
       });
     }
     body.appendChild(tr);
@@ -1992,16 +2180,28 @@ async function regenerateAdmissionPdfs() {
   if (!confirm(`Regenerate PDFs for ${admissionsCache.length} admission(s)? This will overwrite stored PDFs.`)) {
     return;
   }
-  for (const r of admissionsCache) {
-    const admissionId = Number(r.admission_id || 0);
-    if (!admissionId) continue;
-    const payload = buildAdmissionPayloadFromRow(r);
-    const pdfAttachment = await generateAdmissionPdfAttachment(payload);
-    if (!pdfAttachment) continue;
-    const res = await authFetch(`${API}/admissions/${admissionId}/pdf`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    for (const r of admissionsCache) {
+      const admissionId = Number(r.admission_id || 0);
+      if (!admissionId) continue;
+      const payload = buildAdmissionPayloadFromRow(r);
+      let photoBytes = null;
+      if (r.photo_available) {
+        const photoRes = await authFetch(`${API}/admissions/${admissionId}/photo`);
+        if (photoRes.ok) {
+          const buf = await photoRes.arrayBuffer();
+          photoBytes = new Uint8Array(buf);
+          payload.admission_photo_type = photoRes.headers.get("content-type") || "image/jpeg";
+        }
+      }
+      const pdfAttachment = await generateAdmissionPdfAttachment({
+        ...payload,
+        admission_photo_bytes: photoBytes,
+      });
+      if (!pdfAttachment) continue;
+      const res = await authFetch(`${API}/admissions/${admissionId}/pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
         admission_pdf_base64: pdfAttachment.base64,
         admission_pdf_filename: pdfAttachment.filename,
       }),
@@ -2851,7 +3051,8 @@ function afterLoginInit() {
     loadStudentFeeSummary();
   }
   initAnnouncementNotifier();
-  const savedSection = localStorage.getItem("activeSection") || (authInfo && authInfo.role === "student" ? "attendance" : "students");
+  const savedSection = localStorage.getItem("activeSection")
+    || (authInfo && authInfo.role === "student" ? "attendance" : "feed");
   switchSection(savedSection);
   if (!document.querySelector("#testQuestionRows .test-question-row")) {
     addTestQuestionRow();

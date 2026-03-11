@@ -157,6 +157,10 @@ export async function onRequest(context) {
       const id = Number(path.split("/")[1]);
       return await admissionsPdfReplace(id, request, session, env);
     }
+    if (/^admissions\/\d+\/photo$/.test(path) && method === "GET") {
+      const id = Number(path.split("/")[1]);
+      return await admissionsPhoto(id, session, env);
+    }
     if (/^admissions\/\d+$/.test(path) && method === "DELETE") {
       const id = Number(path.split("/")[1]);
       return await admissionsDelete(id, session, env);
@@ -585,6 +589,9 @@ async function ensureAdmissionsTable(env) {
       academic_details_json TEXT NOT NULL DEFAULT '[]',
       admission_pdf_r2_key TEXT,
       admission_pdf_bytes INTEGER,
+      admission_photo_r2_key TEXT,
+      admission_photo_bytes INTEGER,
+      admission_photo_type TEXT,
       status TEXT NOT NULL DEFAULT 'new',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`
@@ -617,6 +624,9 @@ async function ensureAdmissionsTable(env) {
     academic_details_json: "TEXT NOT NULL DEFAULT '[]'",
     admission_pdf_r2_key: "TEXT",
     admission_pdf_bytes: "INTEGER",
+    admission_photo_r2_key: "TEXT",
+    admission_photo_bytes: "INTEGER",
+    admission_photo_type: "TEXT",
     status: "TEXT",
     created_at: "TEXT",
   };
@@ -655,6 +665,31 @@ async function uploadAdmissionPdfToR2(env, pdfBytes, originalFilename) {
   await env.ERP_FILES.put(key, pdfBytes, {
     httpMetadata: {
       contentType: "application/pdf",
+      contentDisposition: `inline; filename="${filename}"`,
+    },
+  });
+  return { stored: true, key };
+}
+
+function sanitizePhotoFilename(name) {
+  const raw = String(name || "").trim();
+  const base = raw ? raw.replace(/[^a-zA-Z0-9._-]/g, "_") : `photo_${Date.now()}.jpg`;
+  return base;
+}
+
+async function uploadAdmissionPhotoToR2(env, photoBytes, originalFilename, contentType) {
+  if (!photoBytes || !photoBytes.length) return { stored: false, key: null };
+  if (!env.ERP_FILES || typeof env.ERP_FILES.put !== "function") {
+    return { stored: false, key: null };
+  }
+  const filename = sanitizePhotoFilename(originalFilename);
+  const now = new Date();
+  const yyyy = String(now.getUTCFullYear());
+  const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const key = `admissions/photos/${yyyy}/${mm}/${crypto.randomUUID()}_${filename}`;
+  await env.ERP_FILES.put(key, photoBytes, {
+    httpMetadata: {
+      contentType: contentType || "image/jpeg",
       contentDisposition: `inline; filename="${filename}"`,
     },
   });
@@ -738,7 +773,23 @@ async function admissionsApply(request, env) {
       throw httpError(413, "Admission PDF must be less than 1 MB");
     }
   }
+  const admissionPhotoBase64 = String(b.admission_photo_base64 || "").trim();
+  const admissionPhotoFilename = String(b.admission_photo_filename || "").trim();
+  const admissionPhotoType = String(b.admission_photo_type || "").trim();
+  const maxPhotoBytes = 1024 * 1024;
+  let admissionPhotoBytes = new Uint8Array(0);
+  if (admissionPhotoBase64) {
+    try {
+      admissionPhotoBytes = decodeBase64ToBytes(admissionPhotoBase64);
+    } catch (_) {
+      throw httpError(400, "Invalid admission photo");
+    }
+    if (admissionPhotoBytes.length > maxPhotoBytes) {
+      throw httpError(413, "Admission photo must be less than 1 MB");
+    }
+  }
   const storedPdf = await uploadAdmissionPdfToR2(env, admissionPdfBytes, admissionPdfFilename);
+  const storedPhoto = await uploadAdmissionPhotoToR2(env, admissionPhotoBytes, admissionPhotoFilename, admissionPhotoType);
   const academicDetails = Array.isArray(b.academic_details) ? b.academic_details : [];
   const academicDetailsJson = JSON.stringify(academicDetails);
   if (!firstName || !lastName || !phone || !email || !course) throw httpError(400, "Missing required fields");
@@ -747,15 +798,19 @@ async function admissionsApply(request, env) {
       full_name,
       first_name, middle_name, last_name, phone, email, blood_group, age, dob, aadhaar_number, nationality,
       father_name, father_phone, father_occupation, father_email, mother_name, mother_phone, mother_occupation, mother_email,
-      correspondence_address, permanent_address, course, academic_details_json, admission_pdf_r2_key, admission_pdf_bytes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      correspondence_address, permanent_address, course, academic_details_json, admission_pdf_r2_key, admission_pdf_bytes,
+      admission_photo_r2_key, admission_photo_bytes, admission_photo_type
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
     fullName,
     firstName, middleName, lastName, phone, email, bloodGroup, age, dob, aadhaarNumber, nationality,
     fatherName, fatherPhone, fatherOccupation, fatherEmail, motherName, motherPhone, motherOccupation, motherEmail,
     correspondenceAddress, permanentAddress, course, academicDetailsJson,
     storedPdf.key,
-    Number(admissionPdfBytes.length || 0)
+    Number(admissionPdfBytes.length || 0),
+    storedPhoto.key,
+    Number(admissionPhotoBytes.length || 0),
+    admissionPhotoType || null
   ).run();
   const admissionId = Number(ins.meta?.last_row_id || 0);
   await writeActivity(
@@ -772,6 +827,9 @@ async function admissionsApply(request, env) {
       email,
       admission_pdf_r2_key: storedPdf.key,
       admission_pdf_bytes: Number(admissionPdfBytes.length || 0),
+      admission_photo_r2_key: storedPhoto.key,
+      admission_photo_bytes: Number(admissionPhotoBytes.length || 0),
+      admission_photo_type: admissionPhotoType || "",
     }
   );
   const emailResult = await sendAdmissionEmail(
@@ -819,7 +877,10 @@ async function admissionsList(session, env) {
       academic_details_json,
       created_at,
       admission_pdf_r2_key,
-      admission_pdf_bytes
+      admission_pdf_bytes,
+      admission_photo_r2_key,
+      admission_photo_bytes,
+      admission_photo_type
     FROM admissions
     ORDER BY admission_id DESC
     LIMIT 500`
@@ -854,6 +915,9 @@ async function admissionsList(session, env) {
       created_at: r.created_at || "",
       pdf_available: Boolean(r.admission_pdf_r2_key),
       pdf_bytes: Number(r.admission_pdf_bytes || 0),
+      photo_available: Boolean(r.admission_photo_r2_key),
+      photo_bytes: Number(r.admission_photo_bytes || 0),
+      photo_type: r.admission_photo_type || "",
     };
   });
   return json(data);
@@ -881,6 +945,35 @@ async function admissionsPdf(admissionId, session, env) {
     status: 200,
     headers: {
       "content-type": "application/pdf",
+      "content-disposition": `inline; filename="${filename}"`,
+      "cache-control": "private, max-age=60",
+    },
+  });
+}
+
+async function admissionsPhoto(admissionId, session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  if (!admissionId) throw httpError(400, "Invalid admission id");
+  await ensureAdmissionsTable(env);
+  const row = await env.DB.prepare(
+    "SELECT admission_photo_r2_key, admission_photo_type, first_name, last_name FROM admissions WHERE admission_id = ?"
+  ).bind(admissionId).first();
+  if (!row) throw httpError(404, "Admission not found");
+  const key = String(row.admission_photo_r2_key || "").trim();
+  if (!key) throw httpError(404, "Admission photo not found");
+  if (!env.ERP_FILES || typeof env.ERP_FILES.get !== "function") {
+    throw httpError(503, "R2 is not configured");
+  }
+  const object = await env.ERP_FILES.get(key);
+  if (!object || !object.body) throw httpError(404, "Admission photo not found in storage");
+  const safeFirst = String(row.first_name || "admission").replace(/[^a-zA-Z0-9._-]/g, "_");
+  const safeLast = String(row.last_name || "").replace(/[^a-zA-Z0-9._-]/g, "_");
+  const ext = String(row.admission_photo_type || "image/jpeg").includes("png") ? "png" : "jpg";
+  const filename = `${safeFirst}${safeLast ? "_" + safeLast : ""}_${admissionId}.${ext}`;
+  return new Response(object.body, {
+    status: 200,
+    headers: {
+      "content-type": row.admission_photo_type || "image/jpeg",
       "content-disposition": `inline; filename="${filename}"`,
       "cache-control": "private, max-age=60",
     },
@@ -2345,8 +2438,9 @@ async function activityUndo(request, session, env) {
         admission_id, full_name, first_name, middle_name, last_name, phone, email, blood_group, age, dob,
         aadhaar_number, nationality, father_name, father_phone, father_occupation, father_email,
         mother_name, mother_phone, mother_occupation, mother_email, correspondence_address,
-        permanent_address, course, academic_details_json, admission_pdf_r2_key, admission_pdf_bytes, status, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        permanent_address, course, academic_details_json, admission_pdf_r2_key, admission_pdf_bytes,
+        admission_photo_r2_key, admission_photo_bytes, admission_photo_type, status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       Number(admission.admission_id || 0),
       String(admission.full_name || ""),
@@ -2374,6 +2468,9 @@ async function activityUndo(request, session, env) {
       String(admission.academic_details_json || "[]"),
       String(admission.admission_pdf_r2_key || ""),
       Number(admission.admission_pdf_bytes || 0),
+      String(admission.admission_photo_r2_key || ""),
+      Number(admission.admission_photo_bytes || 0),
+      String(admission.admission_photo_type || ""),
       String(admission.status || "new"),
       String(admission.created_at || "")
     ).run();
