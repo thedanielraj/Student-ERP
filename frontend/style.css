@@ -1162,3 +1162,14 @@ select {
     padding: 8px 4px;
   }
 }
+
+.boot-error {
+  margin: 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #d42b2b;
+  background: #fff3f3;
+  color: #8c1212;
+  font-weight: 600;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.08);
+}

@@ -1174,7 +1174,27 @@
 
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdf-lib/dist/pdf-lib.min.js"></script>
-  <script type="module" src="/js/main.js?v=20260311"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.getRegistrations()
+        .then((registrations) => registrations.forEach((reg) => reg.unregister()))
+        .catch(() => {});
+    }
+  </script>
+  <div id="bootError" class="boot-error hidden" role="alert"></div>
+  <script type="module">
+    import("/js/main.js?v=20260311")
+      .then(() => { window.__APP_READY__ = true; })
+      .catch((err) => {
+        const message = err && err.message ? err.message : "Failed to load app scripts.";
+        console.error("App boot error:", err);
+        const el = document.getElementById("bootError");
+        if (el) {
+          el.textContent = `App failed to load. ${message}`;
+          el.classList.remove("hidden");
+        }
+      });
+  </script>
   <div id="offlineStatus" class="offline-status hidden"></div>
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   <div id="installBanner" class="install-banner hidden" role="dialog" aria-live="polite">
