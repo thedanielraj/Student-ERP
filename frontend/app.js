@@ -26,6 +26,7 @@ let announcementsNotifierBootstrapped = false;
 let admissionsCache = [];
 let attendanceQueueFlushing = false;
 let deferredInstallPrompt = null;
+let toastTimer = null;
 let leadsState = {
   cache: [],
   statusFilter: "all",
@@ -428,6 +429,19 @@ function updateOfflineStatus() {
   el.classList.add("hidden");
 }
 
+function showToast(message, variant = "") {
+  const toast = document.getElementById("toast");
+  if (!toast) return;
+  toast.textContent = message;
+  toast.classList.remove("hidden", "success");
+  if (variant) toast.classList.add(variant);
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.classList.add("hidden");
+    toast.classList.remove("success");
+  }, 2600);
+}
+
 function getAttendanceQueue() {
   try {
     const raw = localStorage.getItem(ATTENDANCE_QUEUE_KEY);
@@ -460,6 +474,7 @@ async function flushAttendanceQueue() {
   const queue = getAttendanceQueue();
   if (!queue.length) return;
   attendanceQueueFlushing = true;
+  const initialCount = queue.length;
   let remaining = [];
   for (let i = 0; i < queue.length; i += 1) {
     const item = queue[i];
@@ -481,6 +496,10 @@ async function flushAttendanceQueue() {
   saveAttendanceQueue(remaining);
   updateOfflineStatus();
   attendanceQueueFlushing = false;
+  const synced = initialCount - remaining.length;
+  if (synced > 0 && remaining.length === 0) {
+    showToast(`Attendance synced (${synced} batch${synced > 1 ? "es" : ""}).`, "success");
+  }
 }
 
 function initOfflineAttendanceSync() {
@@ -511,6 +530,7 @@ function showInstallBanner(show) {
 function initInstallPrompt() {
   const installBtn = document.getElementById("installBtn");
   const laterBtn = document.getElementById("installLaterBtn");
+  const closeBtn = document.getElementById("installCloseBtn");
   installBtn?.addEventListener("click", async () => {
     if (!deferredInstallPrompt) return;
     deferredInstallPrompt.prompt();
@@ -521,6 +541,11 @@ function initInstallPrompt() {
   laterBtn?.addEventListener("click", () => {
     const oneWeek = 7 * 24 * 60 * 60 * 1000;
     localStorage.setItem(INSTALL_DISMISS_KEY, String(Date.now() + oneWeek));
+    showInstallBanner(false);
+  });
+  closeBtn?.addEventListener("click", () => {
+    const twoWeeks = 14 * 24 * 60 * 60 * 1000;
+    localStorage.setItem(INSTALL_DISMISS_KEY, String(Date.now() + twoWeeks));
     showInstallBanner(false);
   });
 

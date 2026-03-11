@@ -1108,7 +1108,9 @@
   <script src="https://cdn.jsdelivr.net/npm/pdf-lib/dist/pdf-lib.min.js"></script>
   <script src="/app.js"></script>
   <div id="offlineStatus" class="offline-status hidden"></div>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   <div id="installBanner" class="install-banner hidden" role="dialog" aria-live="polite">
+    <button class="install-close" id="installCloseBtn" aria-label="Dismiss install prompt">×</button>
     <div class="install-text">
       <strong>Install Arunand's Aviation ERP</strong>
       <span class="hint">Get quick access and offline-ready attendance.</span>
