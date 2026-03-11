@@ -23,6 +23,9 @@ export async function onRequest(context) {
     if (path === "parent/summary" && method === "GET") {
       return parentSummary(url, env);
     }
+    if (path === "chatbot/ask" && method === "POST") {
+      return await chatbotAsk(request, env);
+    }
     if (path === "leads" && method === "POST") {
       return await leadsCreate(request, env);
     }
@@ -364,6 +367,52 @@ async function leadsCreate(request, env) {
      VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).bind(name, age, qualification, location, phoneRaw, preferredTime, intent).run();
   return json({ status: "ok", message: "Lead captured" });
+}
+
+async function chatbotAsk(request, env) {
+  const body = await request.json().catch(() => ({}));
+  const message = String(body.message || "").trim();
+  const profile = body.profile && typeof body.profile === "object" ? body.profile : {};
+  if (!message) throw httpError(400, "Message is required.");
+  if (!env.AI || typeof env.AI.run !== "function") {
+    throw httpError(503, "AI is not configured.");
+  }
+
+  const name = String(profile.name || "").trim();
+  const age = String(profile.age || "").trim();
+  const qualification = String(profile.qualification || "").trim();
+  const location = String(profile.location || "").trim();
+  const knownParts = [];
+  if (name) knownParts.push(`Name: ${name}`);
+  if (age) knownParts.push(`Age: ${age}`);
+  if (qualification) knownParts.push(`Qualification: ${qualification}`);
+  if (location) knownParts.push(`Location: ${location}`);
+  const knownDetails = knownParts.length ? `Known details: ${knownParts.join(", ")}.` : "";
+
+  const systemPrompt =
+    "You are the official chatbot for Arunand's Aviation Institute in Bangalore. " +
+    "Be warm, concise, and professional. " +
+    "If asked about fees, use INR 1,50,000 (1.5 lakh) as the total fee. " +
+    "Courses: Ground Operations and Cabin Crew. " +
+    "Eligibility is typically 10+2, but confirm based on course. " +
+    "If the user wants to talk to a counsellor, ask for their phone number and preferred time. " +
+    "Do not make promises about discounts or admissions; invite them to share details for follow-up.";
+
+  const messages = [{ role: "system", content: systemPrompt }];
+  if (knownDetails) {
+    messages.push({ role: "user", content: knownDetails });
+  }
+  messages.push({ role: "user", content: message });
+
+  let response;
+  try {
+    response = await env.AI.run("@cf/meta/llama-3-8b-instruct", { messages });
+  } catch (err) {
+    throw httpError(502, "AI request failed.");
+  }
+  const reply = String(response?.response || response?.result?.response || response?.text || "").trim();
+  if (!reply) throw httpError(502, "AI did not return a response.");
+  return json({ reply });
 }
 
 async function leadsList(session, env) {

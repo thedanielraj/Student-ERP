@@ -13,3 +13,6 @@ bucket_name = "student-erp-files"
 
 [vars]
 SESSION_TIMEOUT_SECONDS = "300"
+
+[ai]
+binding = "AI"

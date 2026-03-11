@@ -1,5 +1,7 @@
 import { API, chatbotState } from "./app-core.js";
 
+import { API, chatbotState } from "./app-core.js";
+
 function addChatbotMessage(role, text) {
   const messages = document.getElementById("chatbotMessages");
   if (!messages) return;
@@ -45,6 +47,29 @@ async function submitChatbotLead() {
 
 function isValidPhone(value) {
   return /^\d{10}$/.test(String(value || "").trim());
+}
+
+async function askChatbotAi(message) {
+  try {
+    const res = await fetch(`${API}/chatbot/ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message,
+        profile: {
+          name: chatbotState.profile.name,
+          age: chatbotState.profile.age,
+          qualification: chatbotState.profile.qualification,
+          location: chatbotState.profile.location,
+        },
+      }),
+    });
+    if (!res.ok) return "";
+    const data = await res.json().catch(() => ({}));
+    return String(data.reply || "").trim();
+  } catch (_) {
+    return "";
+  }
 }
 
 async function sendChatbotMessage() {
@@ -155,6 +180,11 @@ async function sendChatbotMessage() {
         return;
       }
       addChatbotMessage("bot", "We have seasonal offers. Please share your 10 digit phone number.");
+      return;
+    }
+    const aiReply = await askChatbotAi(text);
+    if (aiReply) {
+      addChatbotMessage("bot", aiReply);
       return;
     }
     addChatbotMessage("bot", "You can type a number (1-6) or say things like 'fees', 'courses', or 'talk to counsellor'.");
