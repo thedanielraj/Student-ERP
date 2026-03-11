@@ -1772,21 +1772,26 @@ async function loadLeads() {
   if (!body) return;
   const res = await authFetch(`${API}/leads`);
   if (!res.ok) {
-    body.innerHTML = `<tr><td colspan="11" class="empty">Failed to load leads</td></tr>`;
+    body.innerHTML = `<tr><td colspan="12" class="empty">Failed to load leads</td></tr>`;
     return;
   }
   const rows = await res.json();
   body.innerHTML = "";
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="11" class="empty">No leads found</td></tr>`;
+    body.innerHTML = `<tr><td colspan="12" class="empty">No leads found</td></tr>`;
     return;
   }
   rows.forEach((r) => {
     const tr = document.createElement("tr");
     const status = String(r.status || "new");
+    const statusDisplay = status.replace(/_/g, " ");
     const actionBtn = status === "contacted"
       ? `<span class="badge muted">Contacted</span>`
       : `<button class="btn" data-contact-id="${r.lead_id}">Mark Contacted</button>`;
+    const notInterestedBtn = status === "not_interested"
+      ? `<span class="badge muted">Not Interested</span>`
+      : `<button class="btn" data-ni-id="${r.lead_id}">Not Interested</button>`;
+    const followupValue = r.followup_date || "";
     tr.innerHTML = `
       <td>${r.lead_id || "-"}</td>
       <td>${r.name || "-"}</td>
@@ -1796,8 +1801,12 @@ async function loadLeads() {
       <td>${r.age || "-"}</td>
       <td>${r.intent || "-"}</td>
       <td>${r.preferred_time || "-"}</td>
-      <td>${status}</td>
-      <td>${actionBtn}</td>
+      <td>
+        <input class="fee-input" type="date" value="${followupValue}" data-followup-id="${r.lead_id}" />
+        <button class="btn" data-followup-save="${r.lead_id}">Save</button>
+      </td>
+      <td>${statusDisplay}</td>
+      <td>${actionBtn} ${notInterestedBtn}</td>
       <td>${formatDateDDMMYYYY(r.created_at || "")}</td>
     `;
     tr.querySelector("[data-contact-id]")?.addEventListener("click", async (e) => {
@@ -1808,6 +1817,39 @@ async function loadLeads() {
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
         alert(err.detail || "Failed to update lead.");
+        return;
+      }
+      await loadLeads();
+    });
+    tr.querySelector("[data-ni-id]")?.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const id = Number(e.target.dataset.niId || 0);
+      if (!id) return;
+      const resp = await authFetch(`${API}/leads/${id}/not-interested`, { method: "POST" });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        alert(err.detail || "Failed to update lead.");
+        return;
+      }
+      await loadLeads();
+    });
+    tr.querySelector("[data-followup-save]")?.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const id = Number(e.target.dataset.followupSave || 0);
+      const dateInput = tr.querySelector(`[data-followup-id="${id}"]`);
+      const followupDate = String(dateInput?.value || "").trim();
+      if (!followupDate) {
+        alert("Select a follow-up date first.");
+        return;
+      }
+      const resp = await authFetch(`${API}/leads/${id}/followup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ followup_date: followupDate }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        alert(err.detail || "Failed to save follow-up date.");
         return;
       }
       await loadLeads();
@@ -1825,9 +1867,28 @@ function exportLeadsCsv() {
     return;
   }
   const headers = [
-    "ID", "Name", "Phone", "Location", "Qualification", "Age", "Intent", "Preferred Time", "Status", "Submitted",
+    "ID",
+    "Name",
+    "Phone",
+    "Location",
+    "Qualification",
+    "Age",
+    "Intent",
+    "Preferred Time",
+    "Follow-up Date",
+    "Status",
+    "Submitted",
   ];
-  const data = rows.map((row) => Array.from(row.children).slice(0, 10).map((cell) => String(cell.textContent || "").trim()));
+  const data = rows.map((row) => {
+    const cells = Array.from(row.children);
+    const base = cells.slice(0, 8).map((cell) => String(cell.textContent || "").trim());
+    const followupCell = cells[8];
+    const followupInput = followupCell?.querySelector("input");
+    const followupDate = String(followupInput?.value || "").trim();
+    const status = String(cells[9]?.textContent || "").trim();
+    const submitted = String(cells[11]?.textContent || "").trim();
+    return base.concat([followupDate, status, submitted]);
+  });
   const csvLines = [headers.join(",")].concat(
     data.map((row) => row.map((value) => `"${value.replace(/"/g, "\"\"")}"`).join(","))
   );

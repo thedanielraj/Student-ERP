@@ -32,6 +32,16 @@ export async function onRequest(context) {
       const id = Number(path.split("/")[1]);
       return await leadsMarkContacted(id, session, env);
     }
+    if (/^leads\/\d+\/not-interested$/.test(path) && method === "POST") {
+      const session = await requireAuth(request, env);
+      const id = Number(path.split("/")[1]);
+      return await leadsMarkNotInterested(id, session, env);
+    }
+    if (/^leads\/\d+\/followup$/.test(path) && method === "POST") {
+      const session = await requireAuth(request, env);
+      const id = Number(path.split("/")[1]);
+      return await leadsSetFollowup(id, request, session, env);
+    }
     if (path === "admissions/apply" && method === "POST") {
       return await admissionsApply(request, env);
     }
@@ -239,6 +249,7 @@ async function ensureLeadsTable(env) {
       intent TEXT,
       status TEXT NOT NULL DEFAULT 'new',
       contacted_at TEXT,
+      followup_date TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`
   ).run();
@@ -247,6 +258,7 @@ async function ensureLeadsTable(env) {
   const alter = [
     { name: "status", sql: "ALTER TABLE leads ADD COLUMN status TEXT NOT NULL DEFAULT 'new'" },
     { name: "contacted_at", sql: "ALTER TABLE leads ADD COLUMN contacted_at TEXT" },
+    { name: "followup_date", sql: "ALTER TABLE leads ADD COLUMN followup_date TEXT" },
   ];
   for (const col of alter) {
     if (!existing.has(col.name)) {
@@ -279,7 +291,7 @@ async function leadsList(session, env) {
   if (!isSuperuser(session)) throw httpError(403, "Forbidden");
   await ensureLeadsTable(env);
   const rows = await env.DB.prepare(
-    `SELECT lead_id, name, age, qualification, location, phone, preferred_time, intent, status, contacted_at, created_at
+    `SELECT lead_id, name, age, qualification, location, phone, preferred_time, intent, status, contacted_at, followup_date, created_at
      FROM leads
      ORDER BY lead_id DESC
      LIMIT 500`
@@ -295,6 +307,31 @@ async function leadsMarkContacted(leadId, session, env) {
     "UPDATE leads SET status = 'contacted', contacted_at = datetime('now') WHERE lead_id = ?"
   ).bind(leadId).run();
   return json({ status: "ok", lead_id: leadId });
+}
+
+async function leadsMarkNotInterested(leadId, session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  if (!leadId) throw httpError(400, "Invalid lead id");
+  await ensureLeadsTable(env);
+  await env.DB.prepare(
+    "UPDATE leads SET status = 'not_interested' WHERE lead_id = ?"
+  ).bind(leadId).run();
+  return json({ status: "ok", lead_id: leadId });
+}
+
+async function leadsSetFollowup(leadId, request, session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  if (!leadId) throw httpError(400, "Invalid lead id");
+  await ensureLeadsTable(env);
+  const body = await request.json().catch(() => ({}));
+  const followupDate = String(body.followup_date || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(followupDate)) {
+    throw httpError(400, "Invalid follow-up date");
+  }
+  await env.DB.prepare(
+    "UPDATE leads SET followup_date = ? WHERE lead_id = ?"
+  ).bind(followupDate, leadId).run();
+  return json({ status: "ok", lead_id: leadId, followup_date: followupDate });
 }
 
 async function writeActivity(env, session, actionType, description, payload = {}) {
