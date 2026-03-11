@@ -448,6 +448,42 @@ body {
   border: 1px solid var(--line);
 }
 
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.calendar-cell {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px;
+  min-height: 60px;
+  background: #fff;
+}
+
+.calendar-cell .day {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.calendar-cell .value {
+  font-size: 14px;
+  font-weight: 600;
+  margin-top: 6px;
+}
+
+.calendar-cell.present {
+  background: #e7f6ea;
+  border-color: #b9e4c1;
+}
+
+.calendar-cell.absent {
+  background: #fdeaea;
+  border-color: #f2b9b9;
+}
+
 .chatbot {
   position: fixed;
   right: 24px;
@@ -667,6 +703,23 @@ body {
 .tab-content table {
   width: 100%;
   border-collapse: collapse;
+}
+
+.panel {
+  overflow-x: auto;
+}
+
+.panel table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+}
+
+.panel thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  z-index: 1;
 }
 
 th, td {

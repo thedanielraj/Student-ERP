@@ -1339,6 +1339,7 @@ function switchSection(target) {
     ensureAttendanceDateConstraints();
     renderTodayAttendance();
     renderBackAttendance();
+    loadAttendanceCalendar();
   }
   if (target === "fees") {
     loadFeePolicies();
@@ -3056,6 +3057,64 @@ function afterLoginInit() {
   switchSection(savedSection);
   if (!document.querySelector("#testQuestionRows .test-question-row")) {
     addTestQuestionRow();
+  }
+}
+
+async function loadAttendanceCalendar() {
+  const monthInput = document.getElementById("attendanceMonth");
+  const month = (monthInput?.value || "").trim() || getTodayIso().slice(0, 7);
+  if (monthInput && !monthInput.value) monthInput.value = month;
+  const res = await authFetch(`${API}/attendance/month?month=${encodeURIComponent(month)}`);
+  if (!res.ok) return;
+  const data = await res.json().catch(() => ({}));
+  renderAttendanceCalendar(month, data);
+}
+
+function renderAttendanceCalendar(month, data) {
+  const container = document.getElementById("attendanceCalendar");
+  if (!container) return;
+  container.innerHTML = "";
+  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  dayNames.forEach((name) => {
+    const header = document.createElement("div");
+    header.className = "calendar-cell";
+    header.innerHTML = `<div class="day">${name}</div>`;
+    container.appendChild(header);
+  });
+
+  const [y, m] = month.split("-").map(Number);
+  if (!y || !m) return;
+  const first = new Date(Date.UTC(y, m - 1, 1));
+  const startDay = first.getUTCDay();
+  for (let i = 0; i < startDay; i += 1) {
+    const pad = document.createElement("div");
+    pad.className = "calendar-cell";
+    container.appendChild(pad);
+  }
+  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const byDate = new Map((data?.days || []).map((d) => [String(d.date), d]));
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const date = `${String(y)}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const item = byDate.get(date);
+    const cell = document.createElement("div");
+    let cls = "calendar-cell";
+    let value = "-";
+    if (item) {
+      if (data?.mode === "student") {
+        value = item.status || "-";
+        if (String(item.status || "").toLowerCase() === "present") cls += " present";
+        if (String(item.status || "").toLowerCase() === "absent") cls += " absent";
+      } else {
+        const present = Number(item.present || 0);
+        const absent = Number(item.absent || 0);
+        value = `P:${present} A:${absent}`;
+        if (present > absent) cls += " present";
+        else if (absent > present) cls += " absent";
+      }
+    }
+    cell.className = cls;
+    cell.innerHTML = `<div class="day">${day}</div><div class="value">${value}</div>`;
+    container.appendChild(cell);
   }
 }
 

@@ -333,6 +333,17 @@
             <button class="btn" onclick="loadRecentAttendance()">Refresh</button>
           </div>
         </header>
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Attendance Calendar</h2>
+            <span class="hint">Monthly snapshot</span>
+          </div>
+          <div class="form-row attendance-form">
+            <input id="attendanceMonth" type="month" />
+            <button class="btn" onclick="loadAttendanceCalendar()">View Month</button>
+          </div>
+          <div id="attendanceCalendar" class="calendar-grid"></div>
+        </section>
         <section id="studentWelcomePanel" class="panel hidden">
           <div class="panel-header">
             <h2 id="studentWelcomeTitle">Hello</h2>

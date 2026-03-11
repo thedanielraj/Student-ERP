@@ -89,6 +89,7 @@ export async function onRequest(context) {
     }
 
     if (path === "attendance/recent" && method === "GET") return attendanceRecent(session, env);
+    if (path === "attendance/month" && method === "GET") return attendanceMonth(url, session, env);
     if (path === "attendance/by-date" && method === "GET") return attendanceByDate(url, session, env);
     if (path === "attendance/record" && method === "POST") return attendanceRecord(request, session, env);
     if (path === "attendance/sync" && method === "POST") return json({ detail: "Use /attendance/sync/upload with a CSV file." }, 400);
@@ -1754,6 +1755,33 @@ async function attendanceRecent(session, env) {
     rows = await env.DB.prepare("SELECT student_id, student_name, date, attendance_status, remarks FROM attendance WHERE student_id = ? ORDER BY date DESC LIMIT 20").bind(session.user_id).all();
   }
   return json(rows.results || []);
+}
+
+async function attendanceMonth(url, session, env) {
+  const month = String(url.searchParams.get("month") || "").trim();
+  if (!/^\d{4}-\d{2}$/.test(month)) throw httpError(400, "Invalid month");
+  const [year, mon] = month.split("-").map(Number);
+  const start = `${year}-${String(mon).padStart(2, "0")}-01`;
+  const next = mon === 12
+    ? `${year + 1}-01-01`
+    : `${year}-${String(mon + 1).padStart(2, "0")}-01`;
+  if (isSuperuser(session)) {
+    const rows = await env.DB.prepare(
+      `SELECT date,
+        SUM(CASE WHEN attendance_status = 'Present' THEN 1 ELSE 0 END) AS present,
+        SUM(CASE WHEN attendance_status = 'Absent' THEN 1 ELSE 0 END) AS absent
+       FROM attendance
+       WHERE date >= ? AND date < ?
+       GROUP BY date`
+    ).bind(start, next).all();
+    return json({ mode: "staff", month, days: rows.results || [] });
+  }
+  const rows = await env.DB.prepare(
+    `SELECT date, attendance_status AS status
+     FROM attendance
+     WHERE student_id = ? AND date >= ? AND date < ?`
+  ).bind(session.user_id, start, next).all();
+  return json({ mode: "student", month, days: rows.results || [] });
 }
 
 async function attendanceByDate(url, session, env) {
