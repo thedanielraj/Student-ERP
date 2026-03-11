@@ -367,6 +367,11 @@
                 <div id="detailMeta" class="meta">No student selected</div>
               </div>
             </div>
+            <div class="form-row">
+              <input id="parentLinkInput" placeholder="Parent portal link" readonly />
+              <button class="btn" onclick="generateParentLink()">Generate Link</button>
+              <button class="btn" onclick="copyParentLink()">Copy Link</button>
+            </div>
 
             <div class="metrics">
               <div class="metric">
@@ -829,11 +834,6 @@
               <div class="metric"><div class="metric-label">Transactions</div><div id="feedFeesTxn" class="metric-value">-</div></div>
             </div>
 
-            <div class="form-row">
-              <input id="parentLinkInput" placeholder="Parent portal link" readonly />
-              <button class="btn" onclick="generateParentLink()">Generate Link</button>
-              <button class="btn" onclick="copyParentLink()">Copy Link</button>
-            </div>
           </div>
           <div class="panel">
             <div class="panel-header"><h2>Interviews</h2></div>
