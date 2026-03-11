@@ -23,6 +23,10 @@ export async function onRequest(context) {
     if (path === "leads" && method === "POST") {
       return await leadsCreate(request, env);
     }
+    if (path === "leads" && method === "GET") {
+      const session = await requireAuth(request, env);
+      return await leadsList(session, env);
+    }
     if (path === "admissions/apply" && method === "POST") {
       return await admissionsApply(request, env);
     }
@@ -251,6 +255,18 @@ async function leadsCreate(request, env) {
      VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).bind(name, age, qualification, location, phoneRaw, preferredTime, intent).run();
   return json({ status: "ok", message: "Lead captured" });
+}
+
+async function leadsList(session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  await ensureLeadsTable(env);
+  const rows = await env.DB.prepare(
+    `SELECT lead_id, name, age, qualification, location, phone, preferred_time, intent, created_at
+     FROM leads
+     ORDER BY lead_id DESC
+     LIMIT 500`
+  ).all();
+  return json(rows.results || []);
 }
 
 async function writeActivity(env, session, actionType, description, payload = {}) {

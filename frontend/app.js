@@ -1189,6 +1189,9 @@ function switchSection(target) {
   if (target === "admissions") {
     loadAdmissions();
   }
+  if (target === "leads") {
+    loadLeads();
+  }
   if (target === "alumni") {
     loadProudAlumni();
   }
@@ -1760,6 +1763,37 @@ async function loadAdmissions() {
         await deleteAdmission(Number(r.admission_id), r.full_name || "");
       });
     }
+    body.appendChild(tr);
+  });
+}
+
+async function loadLeads() {
+  const body = document.getElementById("leadsBody");
+  if (!body) return;
+  const res = await authFetch(`${API}/leads`);
+  if (!res.ok) {
+    body.innerHTML = `<tr><td colspan="9" class="empty">Failed to load leads</td></tr>`;
+    return;
+  }
+  const rows = await res.json();
+  body.innerHTML = "";
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="9" class="empty">No leads found</td></tr>`;
+    return;
+  }
+  rows.forEach((r) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${r.lead_id || "-"}</td>
+      <td>${r.name || "-"}</td>
+      <td>${r.phone || "-"}</td>
+      <td>${r.location || "-"}</td>
+      <td>${r.qualification || "-"}</td>
+      <td>${r.age || "-"}</td>
+      <td>${r.intent || "-"}</td>
+      <td>${r.preferred_time || "-"}</td>
+      <td>${formatDateDDMMYYYY(r.created_at || "")}</td>
+    `;
     body.appendChild(tr);
   });
 }

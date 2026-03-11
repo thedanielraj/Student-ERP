@@ -178,6 +178,7 @@
         <button class="nav-item" data-section="announcements">Announcements</button>
         <button class="nav-item" data-section="notifications">Notifications</button>
         <button class="nav-item" data-section="admissions">Admissions</button>
+        <button class="nav-item" data-section="leads">Leads</button>
         <button class="nav-item" data-section="activity">Activity</button>
         <button class="nav-item" data-section="alumni">Alumni</button>
         <button class="nav-item" data-section="reports">Reports</button>
@@ -842,6 +843,38 @@
             </thead>
             <tbody id="admissionsBody">
               <tr><td colspan="8" class="empty">No admissions found</td></tr>
+            </tbody>
+          </table>
+        </section>
+      </section>
+
+      <section id="section-leads" class="section hidden">
+        <header class="topbar">
+          <div>
+            <h1>Leads</h1>
+            <p>Chatbot enquiries and follow-ups</p>
+          </div>
+          <div class="top-actions">
+            <button class="btn" onclick="loadLeads()">Refresh</button>
+          </div>
+        </header>
+        <section class="panel">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Phone</th>
+                <th>Location</th>
+                <th>Qualification</th>
+                <th>Age</th>
+                <th>Intent</th>
+                <th>Preferred Time</th>
+                <th>Submitted</th>
+              </tr>
+            </thead>
+            <tbody id="leadsBody">
+              <tr><td colspan="9" class="empty">No leads found</td></tr>
             </tbody>
           </table>
         </section>
