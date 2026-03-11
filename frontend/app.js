@@ -3,6 +3,7 @@ const API = LOCAL_FASTAPI_HOSTS.includes(window.location.host)
   ? window.location.origin
   : `${window.location.origin}/api`;
 const TOKEN_KEY = "authToken";
+const ATTENDANCE_QUEUE_KEY = "offlineAttendanceQueue";
 const NATO_BATCHES = [
   "Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliett",
   "Kilo", "Lima", "Mike", "November", "Oscar", "Papa", "Quebec", "Romeo", "Sierra", "Tango",
@@ -22,6 +23,7 @@ let announcementPollTimer = null;
 let latestAnnouncementIdSeen = Number(localStorage.getItem("latestAnnouncementIdSeen") || 0);
 let announcementsNotifierBootstrapped = false;
 let admissionsCache = [];
+let attendanceQueueFlushing = false;
 let leadsState = {
   cache: [],
   statusFilter: "all",
@@ -395,6 +397,73 @@ function formatMoney(value) {
   return number.toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+  });
+}
+
+function getAttendanceQueue() {
+  try {
+    const raw = localStorage.getItem(ATTENDANCE_QUEUE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function saveAttendanceQueue(queue) {
+  localStorage.setItem(ATTENDANCE_QUEUE_KEY, JSON.stringify(queue));
+}
+
+function enqueueAttendance(payload) {
+  const queue = getAttendanceQueue();
+  queue.push({
+    date: payload.date,
+    records: payload.records,
+    queued_at: new Date().toISOString(),
+  });
+  saveAttendanceQueue(queue);
+}
+
+async function flushAttendanceQueue() {
+  if (attendanceQueueFlushing) return;
+  if (!navigator.onLine) return;
+  if (!localStorage.getItem(TOKEN_KEY)) return;
+  const queue = getAttendanceQueue();
+  if (!queue.length) return;
+  attendanceQueueFlushing = true;
+  let remaining = [];
+  for (let i = 0; i < queue.length; i += 1) {
+    const item = queue[i];
+    try {
+      const res = await authFetch(`${API}/attendance/record`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date: item.date, records: item.records }),
+      });
+      if (!res.ok) {
+        remaining = queue.slice(i);
+        break;
+      }
+    } catch (_) {
+      remaining = queue.slice(i);
+      break;
+    }
+  }
+  saveAttendanceQueue(remaining);
+  attendanceQueueFlushing = false;
+}
+
+function initOfflineAttendanceSync() {
+  window.addEventListener("online", () => {
+    flushAttendanceQueue();
+  });
+  flushAttendanceQueue();
+}
+
 function setupTabs() {
   document.querySelectorAll(".tab").forEach(tab => {
     tab.addEventListener("click", () => {
@@ -412,6 +481,8 @@ populateBatchInputs();
 setupTabs();
 setupSidebarNav();
 setupGlobalSearch();
+registerServiceWorker();
+initOfflineAttendanceSync();
 initSidebarUX();
 loadProudAlumni();
 initChatbot();
@@ -3192,11 +3263,25 @@ async function submitAttendanceForDate(date, opts) {
     };
   });
 
-  const res = await authFetch(`${API}/attendance/record`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ date, records })
-  });
+  const payload = { date, records };
+  if (!navigator.onLine) {
+    enqueueAttendance(payload);
+    alert("You're offline. Attendance saved locally and will sync when you're back online.");
+    return;
+  }
+
+  let res;
+  try {
+    res = await authFetch(`${API}/attendance/record`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+  } catch (_) {
+    enqueueAttendance(payload);
+    alert("Network issue. Attendance saved locally and will sync when you're back online.");
+    return;
+  }
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
