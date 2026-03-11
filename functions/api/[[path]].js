@@ -20,6 +20,9 @@ export async function onRequest(context) {
     if (path === "public/alumni" && method === "GET") {
       return publicAlumni(env);
     }
+    if (path === "parent/summary" && method === "GET") {
+      return parentSummary(url, env);
+    }
     if (path === "leads" && method === "POST") {
       return await leadsCreate(request, env);
     }
@@ -68,6 +71,7 @@ export async function onRequest(context) {
 
     if (path === "activity/logs" && method === "GET") return activityLogs(session, env);
     if (path === "activity/undo" && method === "POST") return activityUndo(request, session, env);
+    if (path === "parent/link" && method === "POST") return parentLinkCreate(request, session, env);
 
     if (path === "students" && method === "GET") return listStudents(session, env);
     if (path === "students" && method === "POST") return addStudent(url, session, env);
@@ -225,6 +229,18 @@ async function ensureCredentials(env) {
       ).bind(row.student_id, await hashPassword(random8Digits())).run();
     }
   }
+}
+
+async function ensureParentLinksTable(env) {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS parent_links (
+      token TEXT PRIMARY KEY,
+      student_id TEXT NOT NULL,
+      expires_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      created_by TEXT
+    )`
+  ).run();
 }
 
 const PASSWORD_HASH_PREFIX = "pbkdf2";
@@ -1783,6 +1799,52 @@ async function attendanceMonth(url, session, env) {
      WHERE student_id = ? AND date >= ? AND date < ?`
   ).bind(session.user_id, start, next).all();
   return json({ mode: "student", month, days: rows.results || [] });
+}
+
+async function parentLinkCreate(request, session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  await ensureParentLinksTable(env);
+  const b = await request.json().catch(() => ({}));
+  const studentId = String(b.student_id || "").trim();
+  const days = Math.max(1, Math.min(Number(b.days || 30), 365));
+  if (!studentId) throw httpError(400, "student_id is required");
+  const token = crypto.randomUUID().replace(/-/g, "");
+  const expiresAt = (() => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  })();
+  await env.DB.prepare(
+    "INSERT INTO parent_links (token, student_id, expires_at, created_by) VALUES (?, ?, ?, ?)"
+  ).bind(token, studentId, expiresAt, session.user_id).run();
+  return json({ status: "ok", token, student_id: studentId, expires_at: expiresAt });
+}
+
+async function parentSummary(url, env) {
+  await ensureParentLinksTable(env);
+  const token = String(url.searchParams.get("token") || "").trim();
+  if (!token) throw httpError(400, "token is required");
+  const link = await env.DB.prepare(
+    "SELECT student_id, expires_at FROM parent_links WHERE token = ?"
+  ).bind(token).first();
+  if (!link) throw httpError(404, "Link not found");
+  if (link.expires_at && String(link.expires_at) < new Date().toISOString().slice(0, 10)) {
+    throw httpError(410, "Link expired");
+  }
+  const studentId = String(link.student_id || "");
+  const student = await env.DB.prepare(
+    "SELECT student_id, student_name, course, batch FROM students WHERE student_id = ?"
+  ).bind(studentId).first();
+  if (!student) throw httpError(404, "Student not found");
+  const financials = await studentFinancials(env, studentId);
+  const attendance = await env.DB.prepare(
+    "SELECT date, attendance_status, remarks FROM attendance WHERE student_id = ? ORDER BY date DESC LIMIT 10"
+  ).bind(studentId).all();
+  return json({
+    student,
+    fees: financials ? { total: financials.total, paid: financials.paid, due: financials.due, due_date: financials.due_date } : null,
+    attendance: attendance.results || [],
+  });
 }
 
 async function attendanceByDate(url, session, env) {

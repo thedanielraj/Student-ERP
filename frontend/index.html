@@ -154,6 +154,56 @@
     </div>
   </div>
 
+  <div id="parentRoot" class="app hidden">
+    <main class="main">
+      <section class="section">
+        <header class="topbar">
+          <div>
+            <h1>Parent Portal</h1>
+            <p id="parentStudentMeta">Student summary</p>
+          </div>
+        </header>
+        <section class="panel">
+          <div class="metrics">
+            <div class="metric">
+              <div class="metric-label">Total Fee</div>
+              <div id="parentFeeTotal" class="metric-value">-</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">Paid</div>
+              <div id="parentFeePaid" class="metric-value">-</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">Due</div>
+              <div id="parentFeeDue" class="metric-value">-</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">Due Date</div>
+              <div id="parentFeeDueDate" class="metric-value">-</div>
+            </div>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Recent Attendance</h2>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Status</th>
+                <th>Remarks</th>
+              </tr>
+            </thead>
+            <tbody id="parentAttendanceBody">
+              <tr><td colspan="3" class="empty">No attendance loaded</td></tr>
+            </tbody>
+          </table>
+        </section>
+      </section>
+    </main>
+  </div>
+
   <div id="appRoot" class="app hidden">
     <button class="hamburger app-hamburger" onclick="toggleSidebar('app')" aria-label="Toggle app menu" aria-expanded="false" title="Menu">
       <span class="bar"></span><span class="bar"></span><span class="bar"></span>
@@ -169,6 +219,9 @@
         </div>
       </div>
       <nav class="nav">
+        <div class="nav-search">
+          <input id="globalSearch" class="search" placeholder="Search all" />
+        </div>
         <button class="nav-item" data-section="feed">Feed</button>
         <button class="nav-item active" data-section="students">Students</button>
         <button class="nav-item" data-section="attendance">Attendance</button>
@@ -703,6 +756,12 @@
               <div class="metric"><div class="metric-label">Due</div><div id="feedFeesDue" class="metric-value">-</div></div>
               <div class="metric"><div class="metric-label">Transactions</div><div id="feedFeesTxn" class="metric-value">-</div></div>
             </div>
+
+            <div class="form-row">
+              <input id="parentLinkInput" placeholder="Parent portal link" readonly />
+              <button class="btn" onclick="generateParentLink()">Generate Link</button>
+              <button class="btn" onclick="copyParentLink()">Copy Link</button>
+            </div>
           </div>
           <div class="panel">
             <div class="panel-header"><h2>Interviews</h2></div>
@@ -956,6 +1015,33 @@
               </div>
             </div>
           </div>
+        </section>
+      </section>
+
+      <section id="section-search" class="section hidden">
+        <header class="topbar">
+          <div>
+            <h1>Search</h1>
+            <p>Results across students, admissions, and fees</p>
+          </div>
+        </header>
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Students</h2>
+          </div>
+          <ul id="searchStudents" class="student-list"></ul>
+        </section>
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Admissions</h2>
+          </div>
+          <ul id="searchAdmissions" class="student-list"></ul>
+        </section>
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Fees</h2>
+          </div>
+          <ul id="searchFees" class="student-list"></ul>
         </section>
       </section>
 

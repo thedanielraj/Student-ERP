@@ -27,6 +27,7 @@ let leadsState = {
   statusFilter: "all",
   upcomingOnly: false,
 };
+let parentMode = false;
 let chatbotState = {
   initialized: false,
   step: "greeting",
@@ -410,9 +411,11 @@ document.getElementById("search")?.addEventListener("input", renderStudentList);
 populateBatchInputs();
 setupTabs();
 setupSidebarNav();
+setupGlobalSearch();
 initSidebarUX();
 loadProudAlumni();
 initChatbot();
+initParentPortal();
 initAuth();
 
 function initChatbot() {
@@ -430,6 +433,53 @@ function initChatbot() {
       sendChatbotMessage();
     }
   });
+}
+
+function initParentPortal() {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get("parent_token");
+  if (!token) return;
+  parentMode = true;
+  document.getElementById("homeRoot")?.classList.add("hidden");
+  document.getElementById("loginRoot")?.classList.add("hidden");
+  document.getElementById("appRoot")?.classList.add("hidden");
+  document.getElementById("parentRoot")?.classList.remove("hidden");
+  loadParentSummary(token);
+}
+
+async function loadParentSummary(token) {
+  const res = await fetch(`${API}/parent/summary?token=${encodeURIComponent(token)}`);
+  if (!res.ok) {
+    document.getElementById("parentStudentMeta").textContent = "Link expired or invalid.";
+    return;
+  }
+  const data = await res.json();
+  const student = data.student || {};
+  document.getElementById("parentStudentMeta").textContent =
+    `${student.student_name || ""} • ${student.student_id || ""} • ${student.course || ""}`;
+  const fees = data.fees || {};
+  setText("parentFeeTotal", formatMoney(fees.total || 0));
+  setText("parentFeePaid", formatMoney(fees.paid || 0));
+  setText("parentFeeDue", formatMoney(fees.due || 0));
+  setText("parentFeeDueDate", fees.due_date ? formatDateDDMMYYYY(fees.due_date) : "-");
+  const body = document.getElementById("parentAttendanceBody");
+  if (body) {
+    body.innerHTML = "";
+    const rows = Array.isArray(data.attendance) ? data.attendance : [];
+    if (!rows.length) {
+      body.innerHTML = `<tr><td colspan="3" class="empty">No attendance loaded</td></tr>`;
+    } else {
+      rows.forEach((r) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${formatDateDDMMYYYY(r.date || "-")}</td>
+          <td>${r.attendance_status || "-"}</td>
+          <td>${r.remarks || ""}</td>
+        `;
+        body.appendChild(tr);
+      });
+    }
+  }
 }
 
 function toggleChatbot() {
@@ -1317,6 +1367,17 @@ function setupSidebarNav() {
   });
 }
 
+function setupGlobalSearch() {
+  const input = document.getElementById("globalSearch");
+  if (!input) return;
+  input.addEventListener("input", () => {
+    const query = String(input.value || "").trim();
+    if (!query) return;
+    switchSection("search");
+    runGlobalSearch(query);
+  });
+}
+
 function switchSection(target) {
   if (authInfo && authInfo.role === "student") {
     const blocked = new Set(["students", "reports", "activity", "admissions"]);
@@ -1375,6 +1436,9 @@ function switchSection(target) {
   }
   if (target === "activity") {
     loadActivityLogs();
+  }
+  if (target === "search") {
+    runGlobalSearch(document.getElementById("globalSearch")?.value || "");
   }
   if (window.matchMedia && window.matchMedia("(max-width: 1100px)").matches) {
     setSidebarOpen("app", false);
@@ -1959,6 +2023,54 @@ async function loadAdmissions() {
     }
     body.appendChild(tr);
   });
+}
+
+async function runGlobalSearch(query) {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return;
+  const isStudent = authInfo && authInfo.role === "student";
+  if (!isStudent && !admissionsCache.length) {
+    await loadAdmissions();
+  }
+  const feeRows = isStudent ? [] : await loadRecentFeesForSearch();
+  const studentResults = allStudents.filter((s) => {
+    const key = `${s.student_name} ${s.student_id} ${s.course} ${s.batch}`.toLowerCase();
+    return key.includes(q);
+  }).slice(0, 8);
+  const admissionResults = isStudent ? [] : admissionsCache.filter((a) => {
+    const key = `${a.full_name} ${a.phone} ${a.email} ${a.course}`.toLowerCase();
+    return key.includes(q);
+  }).slice(0, 8);
+  const feesResults = feeRows.filter((f) => {
+    const key = `${f.student_id} ${f.remarks || ""}`.toLowerCase();
+    return key.includes(q);
+  }).slice(0, 8);
+  renderSearchResults("searchStudents", studentResults.map((s) => `${s.student_name} (${s.student_id}) • ${s.course || "-"}`));
+  renderSearchResults("searchAdmissions", admissionResults.map((a) => `${a.full_name} • ${a.phone} • ${a.course}`));
+  renderSearchResults("searchFees", feesResults.map((f) => `#${f.fee_id} • ${f.student_id} • INR ${formatMoney(f.amount_paid || 0)}`));
+}
+
+function renderSearchResults(id, items) {
+  const list = document.getElementById(id);
+  if (!list) return;
+  list.innerHTML = "";
+  if (!items.length) {
+    list.innerHTML = `<li class="student-item"><strong>No results</strong></li>`;
+    return;
+  }
+  items.forEach((text) => {
+    const li = document.createElement("li");
+    li.className = "student-item";
+    li.textContent = text;
+    list.appendChild(li);
+  });
+}
+
+async function loadRecentFeesForSearch() {
+  const res = await authFetch(`${API}/fees/recent`);
+  if (!res.ok) return [];
+  const rows = await res.json();
+  return Array.isArray(rows) ? rows : [];
 }
 
 async function loadLeads() {
@@ -2842,6 +2954,38 @@ function setText(id, text) {
   if (el) el.textContent = text;
 }
 
+async function generateParentLink() {
+  if (!selectedId) {
+    alert("Select a student first.");
+    return;
+  }
+  const res = await authFetch(`${API}/parent/link`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ student_id: String(selectedId), days: 30 }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "Failed to generate parent link.");
+    return;
+  }
+  const data = await res.json();
+  const url = `${window.location.origin}/?parent_token=${data.token}`;
+  const input = document.getElementById("parentLinkInput");
+  if (input) input.value = url;
+}
+
+function copyParentLink() {
+  const input = document.getElementById("parentLinkInput");
+  const value = String(input?.value || "").trim();
+  if (!value) {
+    alert("Generate a link first.");
+    return;
+  }
+  navigator.clipboard?.writeText(value);
+  alert("Parent link copied.");
+}
+
 function formatDateTime(value) {
   const s = String(value || "").trim();
   if (!s) return "-";
@@ -3094,6 +3238,7 @@ async function submitBackAttendance() {
 }
 
 async function initAuth() {
+  if (parentMode) return;
   const token = localStorage.getItem(TOKEN_KEY);
   if (!token) {
     showHome();

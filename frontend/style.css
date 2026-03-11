@@ -336,6 +336,15 @@ body {
   background: #fff;
 }
 
+.nav-search {
+  padding: 0 6px 10px 6px;
+}
+
+.nav-search .search {
+  width: 100%;
+  min-width: 0;
+}
+
 .grid {
   display: grid;
   grid-template-columns: 340px 1fr;
