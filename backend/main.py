@@ -16,9 +16,9 @@ import base64
 import csv
 from urllib import request as urlrequest, error as urlerror
 from openpyxl import load_workbook
-from backend.import_attendance_excel import import_attendance
+from import_attendance_excel import import_attendance
 from fastapi.middleware.cors import CORSMiddleware
-from backend.db import get_connection, init_db
+from db import get_connection, init_db
 
 app = FastAPI(title="Aviation ERP Lite")
 
@@ -1061,6 +1061,163 @@ def add_payment(student_id: str, amount_total: float, amount_paid: float, remark
     conn.commit()
     conn.close()
     return {"status": "ok", "message": "Fee entry added"}
+
+@app.get("/students/{student_id}/profile")
+def get_student_profile(student_id: str, request: Request):
+    user = _get_current_user(request)
+    _require_self_or_superuser(user, student_id)
+    
+    conn = get_connection()
+    
+    # Get profile data
+    profile_row = conn.execute("""
+        SELECT student_phone, student_email, aadhaar_number, pan_number, blood_group, religion, mother_tongue, address_details,
+               parent_name, parent_occupation, parent_aadhaar, parent_qualification, parent_office_address, parent_office_phone, parent_email, parent_address,
+               guardian_name, guardian_relation, guardian_phone, guardian_aadhaar, guardian_email, guardian_address
+        FROM student_profiles
+        WHERE student_id = ?
+    """, (student_id,)).fetchone()
+    
+    profile_data = {}
+    if profile_row:
+        profile_data = dict(profile_row)
+    
+    # Get files
+    files_rows = conn.execute("""
+        SELECT file_type, file_name, mime_type, length(file_data) as file_size
+        FROM profile_files
+        WHERE student_id = ?
+        ORDER BY uploaded_at DESC
+    """, (student_id,)).fetchall()
+    
+    files = {}
+    for row in files_rows:
+        files[row['file_type']] = {
+            'available': True,
+            'bytes': row['file_size'],
+            'filename': row['file_name'],
+            'mime_type': row['mime_type']
+        }
+    
+    conn.close()
+    
+    return {**profile_data, 'files': files}
+
+@app.post("/students/{student_id}/profile")
+def save_student_profile(
+    student_id: str,
+    request: Request,
+    student_phone: str = Form(None),
+    student_email: str = Form(None),
+    aadhaar_number: str = Form(None),
+    pan_number: str = Form(None),
+    blood_group: str = Form(None),
+    religion: str = Form(None),
+    mother_tongue: str = Form(None),
+    address_details: str = Form(None),
+    parent_name: str = Form(None),
+    parent_occupation: str = Form(None),
+    parent_aadhaar: str = Form(None),
+    parent_qualification: str = Form(None),
+    parent_office_address: str = Form(None),
+    parent_office_phone: str = Form(None),
+    parent_email: str = Form(None),
+    parent_address: str = Form(None),
+    guardian_name: str = Form(None),
+    guardian_relation: str = Form(None),
+    guardian_phone: str = Form(None),
+    guardian_aadhaar: str = Form(None),
+    guardian_email: str = Form(None),
+    guardian_address: str = Form(None),
+    student_photo_base64: str = Form(None),
+    student_photo_filename: str = Form(None),
+    student_photo_type: str = Form(None),
+    parent_photo_base64: str = Form(None),
+    parent_photo_filename: str = Form(None),
+    parent_photo_type: str = Form(None),
+    guardian_photo_base64: str = Form(None),
+    guardian_photo_filename: str = Form(None),
+    guardian_photo_type: str = Form(None),
+    admission_form_base64: str = Form(None),
+    admission_form_filename: str = Form(None),
+    admission_form_type: str = Form(None),
+    pan_card_base64: str = Form(None),
+    pan_card_filename: str = Form(None),
+    pan_card_type: str = Form(None),
+    aadhaar_card_base64: str = Form(None),
+    aadhaar_card_filename: str = Form(None),
+    aadhaar_card_type: str = Form(None)
+):
+    user = _get_current_user(request)
+    _require_self_or_superuser(user, student_id)
+    
+    conn = get_connection()
+    
+    # Upsert profile data
+    conn.execute("""
+        INSERT OR REPLACE INTO student_profiles 
+        (student_id, student_phone, student_email, aadhaar_number, pan_number, blood_group, religion, mother_tongue, address_details,
+         parent_name, parent_occupation, parent_aadhaar, parent_qualification, parent_office_address, parent_office_phone, parent_email, parent_address,
+         guardian_name, guardian_relation, guardian_phone, guardian_aadhaar, guardian_email, guardian_address, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    """, (
+        student_id, student_phone, student_email, aadhaar_number, pan_number, blood_group, religion, mother_tongue, address_details,
+        parent_name, parent_occupation, parent_aadhaar, parent_qualification, parent_office_address, parent_office_phone, parent_email, parent_address,
+        guardian_name, guardian_relation, guardian_phone, guardian_aadhaar, guardian_email, guardian_address
+    ))
+    
+    # Handle file uploads
+    file_fields = [
+        ('student_photo', student_photo_base64, student_photo_filename, student_photo_type),
+        ('parent_photo', parent_photo_base64, parent_photo_filename, parent_photo_type),
+        ('guardian_photo', guardian_photo_base64, guardian_photo_filename, guardian_photo_type),
+        ('admission_form', admission_form_base64, admission_form_filename, admission_form_type),
+        ('pan_card', pan_card_base64, pan_card_filename, pan_card_type),
+        ('aadhaar_card', aadhaar_card_base64, aadhaar_card_filename, aadhaar_card_type)
+    ]
+    
+    for file_type, base64_data, filename, mime_type in file_fields:
+        if base64_data:
+            # Decode base64 to bytes
+            file_data = base64.b64decode(base64_data)
+            
+            # Delete existing file of this type
+            conn.execute("DELETE FROM profile_files WHERE student_id = ? AND file_type = ?", (student_id, file_type))
+            
+            # Insert new file
+            conn.execute("""
+                INSERT INTO profile_files (student_id, file_type, file_name, file_data, mime_type)
+                VALUES (?, ?, ?, ?, ?)
+            """, (student_id, file_type, filename, file_data, mime_type))
+    
+    conn.commit()
+    conn.close()
+    
+    return {"status": "ok", "message": "Profile updated successfully"}
+
+@app.get("/students/{student_id}/profile/files/{file_type}")
+def get_student_profile_file(student_id: str, file_type: str, request: Request):
+    user = _get_current_user(request)
+    _require_self_or_superuser(user, student_id)
+    
+    conn = get_connection()
+    row = conn.execute("""
+        SELECT file_name, file_data, mime_type
+        FROM profile_files
+        WHERE student_id = ? AND file_type = ?
+        ORDER BY uploaded_at DESC
+        LIMIT 1
+    """, (student_id, file_type)).fetchone()
+    conn.close()
+    
+    if not row:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    return FileResponse(
+        content=row['file_data'],
+        media_type=row['mime_type'] or 'application/octet-stream',
+        filename=row['file_name'] or f"{file_type}.bin"
+    )
 
 @app.get("/attendance/recent")
 def recent_attendance(request: Request):
