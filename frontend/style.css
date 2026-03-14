@@ -907,6 +907,12 @@ th, td {
   gap: 10px;
 }
 
+.file-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .attendance-form {
   grid-template-columns: 220px 180px 180px;
   align-items: center;

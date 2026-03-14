@@ -95,6 +95,21 @@ export async function onRequest(context) {
       return studentFees(studentId, session, env);
     }
 
+    if (path.startsWith("students/") && path.endsWith("/profile") && method === "GET") {
+      const studentId = path.split("/")[1];
+      return studentProfileGet(studentId, session, env);
+    }
+    if (path.startsWith("students/") && path.endsWith("/profile") && method === "POST") {
+      const studentId = path.split("/")[1];
+      return await studentProfileSave(studentId, request, session, env);
+    }
+    if (path.startsWith("students/") && path.match(/\/profile\/files\/[^\/]+$/) && method === "GET") {
+      const parts = path.split("/");
+      const studentId = parts[1];
+      const fileType = parts[4];
+      return studentProfileFile(studentId, fileType, session, env);
+    }
+
     if (path === "attendance/recent" && method === "GET") return attendanceRecent(session, env);
     if (path === "attendance/month" && method === "GET") return attendanceMonth(url, session, env);
     if (path === "attendance/by-date" && method === "GET") return attendanceByDate(url, session, env);
@@ -357,6 +372,49 @@ async function ensureLeadsTable(env) {
       await env.DB.prepare(col.sql).run();
     }
   }
+}
+
+async function ensureProfileTables(env) {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS student_profiles (
+      student_id TEXT PRIMARY KEY,
+      student_phone TEXT,
+      student_email TEXT,
+      aadhaar_number TEXT,
+      pan_number TEXT,
+      blood_group TEXT,
+      religion TEXT,
+      mother_tongue TEXT,
+      address_details TEXT,
+      parent_name TEXT,
+      parent_occupation TEXT,
+      parent_aadhaar TEXT,
+      parent_qualification TEXT,
+      parent_office_address TEXT,
+      parent_office_phone TEXT,
+      parent_email TEXT,
+      parent_address TEXT,
+      guardian_name TEXT,
+      guardian_relation TEXT,
+      guardian_phone TEXT,
+      guardian_aadhaar TEXT,
+      guardian_email TEXT,
+      guardian_address TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`
+  ).run();
+  
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS profile_files (
+      file_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      student_id TEXT NOT NULL,
+      file_type TEXT NOT NULL,
+      file_name TEXT,
+      file_data BLOB,
+      mime_type TEXT,
+      uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`
+  ).run();
 }
 
 async function leadsCreate(request, env) {
@@ -1819,6 +1877,125 @@ async function studentFees(studentId, session, env) {
     "SELECT fee_id, amount_total, amount_paid, due_date, remarks, created_at FROM fees WHERE student_id = ? ORDER BY fee_id DESC"
   ).bind(studentId).all();
   return json(rows.results || []);
+}
+
+async function studentProfileGet(studentId, session, env) {
+  ensureSelfOrSuperuser(session, studentId);
+  await ensureProfileTables(env);
+  
+  // Get profile data
+  const profileRow = await env.DB.prepare(`
+    SELECT student_phone, student_email, aadhaar_number, pan_number, blood_group, religion, mother_tongue, address_details,
+           parent_name, parent_occupation, parent_aadhaar, parent_qualification, parent_office_address, parent_office_phone, parent_email, parent_address,
+           guardian_name, guardian_relation, guardian_phone, guardian_aadhaar, guardian_email, guardian_address
+    FROM student_profiles
+    WHERE student_id = ?
+  `).bind(studentId).first();
+  
+  const profileData = profileRow || {};
+  
+  // Get files
+  const filesRows = await env.DB.prepare(`
+    SELECT file_type, file_name, mime_type, length(file_data) as file_size
+    FROM profile_files
+    WHERE student_id = ?
+    ORDER BY uploaded_at DESC
+  `).bind(studentId).all();
+  
+  const files = {};
+  for (const row of filesRows.results || []) {
+    files[row.file_type] = {
+      available: true,
+      bytes: row.file_size,
+      filename: row.file_name,
+      mime_type: row.mime_type
+    };
+  }
+  
+  return json({ ...profileData, files });
+}
+
+async function studentProfileSave(studentId, request, session, env) {
+  ensureSelfOrSuperuser(session, studentId);
+  await ensureProfileTables(env);
+  
+  const formData = await request.formData();
+  const payload = {};
+  
+  // Extract text fields
+  const textFields = [
+    'student_phone', 'student_email', 'aadhaar_number', 'pan_number', 'blood_group', 'religion', 'mother_tongue', 'address_details',
+    'parent_name', 'parent_occupation', 'parent_aadhaar', 'parent_qualification', 'parent_office_address', 'parent_office_phone', 'parent_email', 'parent_address',
+    'guardian_name', 'guardian_relation', 'guardian_phone', 'guardian_aadhaar', 'guardian_email', 'guardian_address'
+  ];
+  
+  for (const field of textFields) {
+    payload[field] = formData.get(field) || null;
+  }
+  
+  // Upsert profile data
+  await env.DB.prepare(`
+    INSERT OR REPLACE INTO student_profiles 
+    (student_id, student_phone, student_email, aadhaar_number, pan_number, blood_group, religion, mother_tongue, address_details,
+     parent_name, parent_occupation, parent_aadhaar, parent_qualification, parent_office_address, parent_office_phone, parent_email, parent_address,
+     guardian_name, guardian_relation, guardian_phone, guardian_aadhaar, guardian_email, guardian_address, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+  `).bind(
+    studentId,
+    payload.student_phone, payload.student_email, payload.aadhaar_number, payload.pan_number, payload.blood_group, payload.religion, payload.mother_tongue, payload.address_details,
+    payload.parent_name, payload.parent_occupation, payload.parent_aadhaar, payload.parent_qualification, payload.parent_office_address, payload.parent_office_phone, payload.parent_email, payload.parent_address,
+    payload.guardian_name, payload.guardian_relation, payload.guardian_phone, payload.guardian_aadhaar, payload.guardian_email, payload.guardian_address
+  ).run();
+  
+  // Handle file uploads
+  const fileFields = [
+    'student_photo', 'parent_photo', 'guardian_photo', 'admission_form', 'pan_card', 'aadhaar_card'
+  ];
+  
+  for (const fileType of fileFields) {
+    const file = formData.get(`${fileType}_base64`);
+    const filename = formData.get(`${fileType}_filename`);
+    const mimeType = formData.get(`${fileType}_type`);
+    
+    if (file) {
+      const fileData = decodeBase64ToBytes(file);
+      
+      // Delete existing file of this type
+      await env.DB.prepare("DELETE FROM profile_files WHERE student_id = ? AND file_type = ?").bind(studentId, fileType).run();
+      
+      // Insert new file
+      await env.DB.prepare(`
+        INSERT INTO profile_files (student_id, file_type, file_name, file_data, mime_type)
+        VALUES (?, ?, ?, ?, ?)
+      `).bind(studentId, fileType, filename, fileData, mimeType).run();
+    }
+  }
+  
+  return json({ status: "ok", message: "Profile updated successfully" });
+}
+
+async function studentProfileFile(studentId, fileType, session, env) {
+  ensureSelfOrSuperuser(session, studentId);
+  await ensureProfileTables(env);
+  
+  const row = await env.DB.prepare(`
+    SELECT file_name, file_data, mime_type
+    FROM profile_files
+    WHERE student_id = ? AND file_type = ?
+    ORDER BY uploaded_at DESC
+    LIMIT 1
+  `).bind(studentId, fileType).first();
+  
+  if (!row) {
+    throw httpError(404, "File not found");
+  }
+  
+  return new Response(row.file_data, {
+    headers: {
+      "Content-Type": row.mime_type || "application/octet-stream",
+      "Content-Disposition": `attachment; filename="${row.file_name || `${fileType}.bin`}"`,
+    },
+  });
 }
 
 function parseRazorpayRemarks(remarks) {

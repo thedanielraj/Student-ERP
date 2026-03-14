@@ -296,6 +296,7 @@
         <button class="nav-item active" data-section="students">Students</button>
         <button class="nav-item" data-section="attendance">Attendance</button>
         <button class="nav-item" data-section="fees">Fees</button>
+        <button class="nav-item" data-section="profile">Profile</button>
         <button class="nav-item" data-section="tests">Tests</button>
         <button class="nav-item" data-section="timetable">Timetable</button>
         <button class="nav-item" data-section="interviews">Interviews</button>
@@ -706,6 +707,106 @@
             <input id="adminPasswordUsername" placeholder="Username (e.g., AAI123 / praharsh)" />
             <input id="adminPasswordNew" type="password" placeholder="New password" />
             <button class="btn" onclick="adminSetUserPassword()">Set User Password</button>
+          </div>
+        </section>
+      </section>
+
+      <section id="section-profile" class="section hidden">
+        <header class="topbar">
+          <div>
+            <h1>My Profile</h1>
+            <p>Update your personal, parent, and guardian details</p>
+          </div>
+          <div class="top-actions">
+            <button class="btn" onclick="loadStudentProfile()">Refresh</button>
+          </div>
+        </header>
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Student Details</h2>
+          </div>
+          <div class="form-row">
+            <input id="profileStudentPhone" placeholder="Student Mobile Number" inputmode="numeric" pattern="\\d{10}" maxlength="10" />
+            <input id="profileStudentEmail" placeholder="Student Email ID" type="email" />
+            <input id="profileStudentAadhaar" placeholder="Aadhaar Number" inputmode="numeric" pattern="\\d{12}" maxlength="12" />
+            <input id="profileStudentPan" placeholder="PAN Card Number" />
+            <input id="profileStudentBloodGroup" placeholder="Blood Group" />
+            <input id="profileStudentReligion" placeholder="Religion" />
+            <input id="profileStudentMotherTongue" placeholder="Mother Tongue" />
+            <input id="profileStudentDetails" placeholder="Address / Details" />
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Parent Details</h2>
+          </div>
+          <div class="form-row">
+            <input id="profileParentName" placeholder="Parent Name" />
+            <input id="profileParentOccupation" placeholder="Parent Occupation" />
+            <input id="profileParentAadhaar" placeholder="Parent Aadhaar Number" inputmode="numeric" pattern="\\d{12}" maxlength="12" />
+            <input id="profileParentQualification" placeholder="Parent Qualification" />
+            <input id="profileParentOfficeAddress" placeholder="Office Address" />
+            <input id="profileParentOfficePhone" placeholder="Office Phone Number" inputmode="numeric" pattern="\\d{10}" maxlength="10" />
+            <input id="profileParentEmail" placeholder="Parent Email ID" type="email" />
+            <input id="profileParentAddress" placeholder="Parent Address" />
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Guardian Details</h2>
+          </div>
+          <div class="form-row">
+            <input id="profileGuardianName" placeholder="Guardian Name" />
+            <input id="profileGuardianRelation" placeholder="Relation" />
+            <input id="profileGuardianPhone" placeholder="Guardian Phone Number" inputmode="numeric" pattern="\\d{10}" maxlength="10" />
+            <input id="profileGuardianAadhaar" placeholder="Guardian Aadhaar Number" inputmode="numeric" pattern="\\d{12}" maxlength="12" />
+            <input id="profileGuardianEmail" placeholder="Guardian Email ID" type="email" />
+            <input id="profileGuardianAddress" placeholder="Guardian Address" />
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Documents & Photos</h2>
+          </div>
+          <div class="form-row">
+            <div class="file-block">
+              <div class="hint">Student Photo</div>
+              <input id="profileStudentPhoto" type="file" accept="image/*" />
+              <div id="profileStudentPhotoStatus" class="hint">No photo uploaded</div>
+            </div>
+            <div class="file-block">
+              <div class="hint">Parent Photo</div>
+              <input id="profileParentPhoto" type="file" accept="image/*" />
+              <div id="profileParentPhotoStatus" class="hint">No photo uploaded</div>
+            </div>
+            <div class="file-block">
+              <div class="hint">Guardian Photo</div>
+              <input id="profileGuardianPhoto" type="file" accept="image/*" />
+              <div id="profileGuardianPhotoStatus" class="hint">No photo uploaded</div>
+            </div>
+            <div class="file-block">
+              <div class="hint">Admission Form</div>
+              <input id="profileAdmissionForm" type="file" accept="application/pdf,image/*" />
+              <div id="profileAdmissionFormStatus" class="hint">No file uploaded</div>
+            </div>
+            <div class="file-block">
+              <div class="hint">PAN Card</div>
+              <input id="profilePanCardFile" type="file" accept="application/pdf,image/*" />
+              <div id="profilePanCardStatus" class="hint">No file uploaded</div>
+            </div>
+            <div class="file-block">
+              <div class="hint">Aadhaar Card</div>
+              <input id="profileAadhaarCardFile" type="file" accept="application/pdf,image/*" />
+              <div id="profileAadhaarCardStatus" class="hint">No file uploaded</div>
+            </div>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Save Changes</h2>
+          </div>
+          <div class="form-row">
+            <button class="btn primary" onclick="saveStudentProfile()">Save Profile</button>
           </div>
         </section>
       </section>

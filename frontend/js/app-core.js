@@ -36,6 +36,63 @@ let leadsState = {
   upcomingOnly: false,
 };
 let parentMode = false;
+let studentProfileCache = null;
+const PROFILE_FILE_FIELDS = [
+  {
+    key: "student_photo",
+    inputId: "profileStudentPhoto",
+    statusId: "profileStudentPhotoStatus",
+    label: "Student photo",
+    base64Key: "student_photo_base64",
+    filenameKey: "student_photo_filename",
+    typeKey: "student_photo_type",
+  },
+  {
+    key: "parent_photo",
+    inputId: "profileParentPhoto",
+    statusId: "profileParentPhotoStatus",
+    label: "Parent photo",
+    base64Key: "parent_photo_base64",
+    filenameKey: "parent_photo_filename",
+    typeKey: "parent_photo_type",
+  },
+  {
+    key: "guardian_photo",
+    inputId: "profileGuardianPhoto",
+    statusId: "profileGuardianPhotoStatus",
+    label: "Guardian photo",
+    base64Key: "guardian_photo_base64",
+    filenameKey: "guardian_photo_filename",
+    typeKey: "guardian_photo_type",
+  },
+  {
+    key: "admission_form",
+    inputId: "profileAdmissionForm",
+    statusId: "profileAdmissionFormStatus",
+    label: "Admission form",
+    base64Key: "admission_form_base64",
+    filenameKey: "admission_form_filename",
+    typeKey: "admission_form_type",
+  },
+  {
+    key: "pan_card",
+    inputId: "profilePanCardFile",
+    statusId: "profilePanCardStatus",
+    label: "PAN card",
+    base64Key: "pan_card_base64",
+    filenameKey: "pan_card_filename",
+    typeKey: "pan_card_type",
+  },
+  {
+    key: "aadhaar_card",
+    inputId: "profileAadhaarCardFile",
+    statusId: "profileAadhaarCardStatus",
+    label: "Aadhaar card",
+    base64Key: "aadhaar_card_base64",
+    filenameKey: "aadhaar_card_filename",
+    typeKey: "aadhaar_card_type",
+  },
+];
 export let chatbotState = {
   initialized: false,
   step: "greeting",
@@ -1442,10 +1499,13 @@ function setupGlobalSearch() {
 
 function switchSection(target) {
   if (authInfo && authInfo.role === "student") {
-    const blocked = new Set(["students", "reports", "activity", "admissions"]);
+    const blocked = new Set(["students", "reports", "activity", "admissions", "leads"]);
     if (blocked.has(target)) {
       target = "attendance";
     }
+  }
+  if (authInfo && authInfo.role !== "student" && target === "profile") {
+    target = "feed";
   }
   document.querySelectorAll(".nav-item").forEach(b => b.classList.remove("active"));
   const activeBtn = document.querySelector(`.nav-item[data-section="${target}"]`);
@@ -1456,6 +1516,9 @@ function switchSection(target) {
   const sectionEl = document.getElementById(`section-${target}`);
   if (sectionEl) {
     sectionEl.classList.remove("hidden");
+  }
+  if (target === "profile") {
+    loadStudentProfile();
   }
   localStorage.setItem("activeSection", target);
   if (target === "attendance") {
@@ -2935,6 +2998,24 @@ function setText(id, text) {
   if (el) el.textContent = text;
 }
 
+function setInputValue(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.value = value || "";
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes || 0);
+  if (!value) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let idx = 0;
+  let size = value;
+  while (size >= 1024 && idx < units.length - 1) {
+    size /= 1024;
+    idx += 1;
+  }
+  return `${size.toFixed(size >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
+
 async function generateParentLink() {
   if (!selectedId) {
     alert("Select a student first.");
@@ -3148,11 +3229,17 @@ function applyRoleUI() {
 
   document.querySelectorAll(".nav-item").forEach(btn => {
     const section = btn.dataset.section;
-    if (isStudent && (section === "students" || section === "reports" || section === "activity" || section === "admissions")) {
-      btn.classList.add("hidden");
-    } else {
-      btn.classList.remove("hidden");
+    const studentHidden = new Set(["students", "reports", "activity", "admissions", "leads"]);
+    const staffHidden = new Set(["profile"]);
+    if (isStudent && studentHidden.has(section)) {
+      btn.remove(); // Remove entirely for students
+      return;
     }
+    if (!isStudent && staffHidden.has(section)) {
+      btn.classList.add("hidden");
+      return;
+    }
+    btn.classList.remove("hidden");
   });
 
   const welcomePanel = document.getElementById("studentWelcomePanel");
@@ -3275,6 +3362,121 @@ async function loadStudentFeeSummary() {
   }
 }
 
+function setProfileFileStatus(statusId, info, label, fileType) {
+  const el = document.getElementById(statusId);
+  if (!el) return;
+  if (info && info.available) {
+    const sizeLabel = info.bytes ? formatBytes(info.bytes) : "uploaded";
+    const downloadUrl = `${API}/students/${encodeURIComponent(authInfo.user)}/profile/files/${fileType}`;
+    el.innerHTML = `${label} uploaded (${sizeLabel}) - <a href="${downloadUrl}" target="_blank" style="color: #007bff;">Download</a>`;
+  } else {
+    el.textContent = `No ${label.toLowerCase()} uploaded`;
+  }
+}
+
+async function loadStudentProfile() {
+  if (!authInfo || authInfo.role !== "student") return;
+  const res = await authFetch(`${API}/students/${encodeURIComponent(authInfo.user)}/profile`);
+  if (!res.ok) return;
+  const data = await res.json().catch(() => ({}));
+  studentProfileCache = data || {};
+
+  setInputValue("profileStudentPhone", data.student_phone || "");
+  setInputValue("profileStudentEmail", data.student_email || "");
+  setInputValue("profileStudentAadhaar", data.aadhaar_number || "");
+  setInputValue("profileStudentPan", data.pan_number || "");
+  setInputValue("profileStudentBloodGroup", data.blood_group || "");
+  setInputValue("profileStudentReligion", data.religion || "");
+  setInputValue("profileStudentMotherTongue", data.mother_tongue || "");
+  setInputValue("profileStudentDetails", data.address_details || "");
+
+  setInputValue("profileParentName", data.parent_name || "");
+  setInputValue("profileParentOccupation", data.parent_occupation || "");
+  setInputValue("profileParentAadhaar", data.parent_aadhaar || "");
+  setInputValue("profileParentQualification", data.parent_qualification || "");
+  setInputValue("profileParentOfficeAddress", data.parent_office_address || "");
+  setInputValue("profileParentOfficePhone", data.parent_office_phone || "");
+  setInputValue("profileParentEmail", data.parent_email || "");
+  setInputValue("profileParentAddress", data.parent_address || "");
+
+  setInputValue("profileGuardianName", data.guardian_name || "");
+  setInputValue("profileGuardianRelation", data.guardian_relation || "");
+  setInputValue("profileGuardianPhone", data.guardian_phone || "");
+  setInputValue("profileGuardianAadhaar", data.guardian_aadhaar || "");
+  setInputValue("profileGuardianEmail", data.guardian_email || "");
+  setInputValue("profileGuardianAddress", data.guardian_address || "");
+
+  const files = data.files || {};
+  PROFILE_FILE_FIELDS.forEach((field) => {
+    setProfileFileStatus(field.statusId, files[field.key], field.label, field.key);
+  });
+}
+
+function clearProfileFileInputs() {
+  PROFILE_FILE_FIELDS.forEach((field) => {
+    const input = document.getElementById(field.inputId);
+    if (input) input.value = "";
+  });
+}
+
+async function saveStudentProfile() {
+  if (!authInfo || authInfo.role !== "student") return;
+  const payload = {
+    student_phone: value("profileStudentPhone"),
+    student_email: value("profileStudentEmail"),
+    aadhaar_number: value("profileStudentAadhaar"),
+    pan_number: value("profileStudentPan"),
+    blood_group: value("profileStudentBloodGroup"),
+    religion: value("profileStudentReligion"),
+    mother_tongue: value("profileStudentMotherTongue"),
+    address_details: value("profileStudentDetails"),
+    parent_name: value("profileParentName"),
+    parent_occupation: value("profileParentOccupation"),
+    parent_aadhaar: value("profileParentAadhaar"),
+    parent_qualification: value("profileParentQualification"),
+    parent_office_address: value("profileParentOfficeAddress"),
+    parent_office_phone: value("profileParentOfficePhone"),
+    parent_email: value("profileParentEmail"),
+    parent_address: value("profileParentAddress"),
+    guardian_name: value("profileGuardianName"),
+    guardian_relation: value("profileGuardianRelation"),
+    guardian_phone: value("profileGuardianPhone"),
+    guardian_aadhaar: value("profileGuardianAadhaar"),
+    guardian_email: value("profileGuardianEmail"),
+    guardian_address: value("profileGuardianAddress"),
+  };
+
+  try {
+    for (const field of PROFILE_FILE_FIELDS) {
+      const input = document.getElementById(field.inputId);
+      const file = input?.files?.[0];
+      if (!file) continue;
+      const bytes = await readFileAsBytes(file);
+      if (bytes && bytes.length > 1024 * 1024) {
+        throw new Error(`${field.label} must be less than 1 MB.`);
+      }
+      payload[field.base64Key] = bytes ? bytesToBase64(bytes) : "";
+      payload[field.filenameKey] = file.name || `${field.key}.bin`;
+      payload[field.typeKey] = file.type || "application/octet-stream";
+    }
+  } catch (err) {
+    alert(err.message || "Failed to read profile files.");
+    return;
+  }
+
+  const res = await authFetch(`${API}/students/${encodeURIComponent(authInfo.user)}/profile`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    autoHandleError: true,
+    errorMessage: "Failed to save profile.",
+  });
+  if (!res.ok) return;
+  clearProfileFileInputs();
+  await loadStudentProfile();
+  alert("Profile updated.");
+}
+
 async function payNowRazorpay() {
   if (!authInfo || authInfo.role !== "student") return;
   const dueAmount = Number(studentFeeSummary?.balance || 0);
@@ -3366,15 +3568,112 @@ async function downloadInvoicePdf(invoice) {
   const accent = rgb(0.06, 0.27, 0.5);
   const muted = rgb(0.15, 0.2, 0.3);
   const dim = rgb(0.3, 0.35, 0.45);
+  const text = rgb(0.08, 0.08, 0.08);
+  const border = rgb(0.12, 0.12, 0.12);
   let logoImage = null;
   let logoWidth = 0;
   let logoHeight = 0;
+
+  const wrapText = (value, maxWidth, useFont, size) => {
+    const words = String(value || "-").split(/\s+/).filter(Boolean);
+    if (!words.length) return ["-"];
+    const lines = [];
+    let current = "";
+    for (const word of words) {
+      const candidate = current ? `${current} ${word}` : word;
+      const width = useFont.widthOfTextAtSize(candidate, size);
+      if (width <= maxWidth) {
+        current = candidate;
+      } else {
+        if (current) lines.push(current);
+        current = word;
+      }
+    }
+    if (current) lines.push(current);
+    return lines.length ? lines : ["-"];
+  };
+
+  const measureText = (value, useFont, size) => useFont.widthOfTextAtSize(String(value || ""), size);
+
+  const drawCenteredText = (page, value, y, size, useFont, color, left, width) => {
+    const textWidth = measureText(value, useFont, size);
+    const x = left + Math.max((width - textWidth) / 2, 0);
+    page.drawText(String(value), { x, y, size, font: useFont, color });
+  };
+
+  const drawAlignedText = (page, value, x, y, width, align, size, useFont, color) => {
+    const textWidth = measureText(value, useFont, size);
+    let drawX = x;
+    if (align === "center") drawX = x + Math.max((width - textWidth) / 2, 0);
+    if (align === "right") drawX = x + Math.max(width - textWidth, 0);
+    page.drawText(String(value), { x: drawX, y, size, font: useFont, color });
+  };
+
+  const numberToWords = (num) => {
+    const ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
+      "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+    const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+
+    const toTwoDigits = (n) => {
+      if (n < 20) return ones[n];
+      const t = Math.floor(n / 10);
+      const o = n % 10;
+      return `${tens[t]}${o ? ` ${ones[o]}` : ""}`.trim();
+    };
+
+    const toThreeDigits = (n) => {
+      const h = Math.floor(n / 100);
+      const r = n % 100;
+      if (!h) return toTwoDigits(r);
+      if (!r) return `${ones[h]} Hundred`;
+      return `${ones[h]} Hundred ${toTwoDigits(r)}`.trim();
+    };
+
+    if (num === 0) return "Zero";
+    let n = Math.floor(num);
+    const parts = [];
+    const crore = Math.floor(n / 10000000);
+    n %= 10000000;
+    const lakh = Math.floor(n / 100000);
+    n %= 100000;
+    const thousand = Math.floor(n / 1000);
+    n %= 1000;
+    const hundred = n;
+
+    if (crore) parts.push(`${toTwoDigits(crore)} Crore`);
+    if (lakh) parts.push(`${toTwoDigits(lakh)} Lakh`);
+    if (thousand) parts.push(`${toTwoDigits(thousand)} Thousand`);
+    if (hundred) parts.push(toThreeDigits(hundred));
+    return parts.join(" ").trim();
+  };
+
+  const amountToWords = (amount) => {
+    const total = Number(amount || 0);
+    const rupees = Math.floor(total);
+    const paise = Math.round((total - rupees) * 100);
+    const rupeeWords = `${numberToWords(rupees)} Rupees`;
+    if (paise > 0) {
+      return `${rupeeWords} And ${numberToWords(paise)} Paise Only`;
+    }
+    return `${rupeeWords} Only`;
+  };
+
+  const getAcademicYearLabel = (dateValue) => {
+    const date = new Date(dateValue || Date.now());
+    if (Number.isNaN(date.getTime())) return "----";
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    if (month >= 5) {
+      return `${year}-${String(year + 1).slice(-2)}`;
+    }
+    return `${year - 1}-${String(year).slice(-2)}`;
+  };
 
   try {
     const logoRes = await fetch("/assets/logo.png");
     const logoBytes = await logoRes.arrayBuffer();
     logoImage = await pdfDoc.embedPng(logoBytes);
-    const maxW = 150;
+    const maxW = 90;
     const scale = maxW / logoImage.width;
     logoWidth = logoImage.width * scale;
     logoHeight = logoImage.height * scale;
@@ -3386,79 +3685,187 @@ async function downloadInvoicePdf(invoice) {
 
   const drawReceiptPage = (copyLabel) => {
     const page = pdfDoc.addPage([595, 842]);
+    const pageWidth = 595;
+    const contentLeft = 42;
+    const contentRight = 553;
+    const contentWidth = contentRight - contentLeft;
     page.drawRectangle({
       x: 30,
       y: 30,
       width: 535,
       height: 782,
-      borderColor: accent,
+      borderColor: border,
       borderWidth: 1.2,
     });
 
+    const schoolName = "Arunand's Aviation Institute";
+    const schoolAddress = "Bangalore, India";
+    const schoolContact = "Contact No.: -";
+    const schoolWebsite = "Website: arunandsaviation.com";
+
+    const headerTop = 795;
     if (logoImage) {
       page.drawImage(logoImage, {
-        x: 42,
-        y: 730,
+        x: contentLeft,
+        y: headerTop - logoHeight + 6,
         width: logoWidth,
         height: logoHeight,
       });
     }
 
-    const headerX = 42 + (logoWidth ? logoWidth + 16 : 0);
-    page.drawText("Fee Payment Receipt", {
-      x: headerX,
-      y: 710,
-      size: 20,
-      font: fontBold,
-      color: accent,
-    });
-    page.drawText(copyLabel, {
-      x: headerX,
-      y: 690,
-      size: 11,
-      font,
-      color: muted,
-    });
+    drawCenteredText(page, schoolName.toUpperCase(), headerTop, 16, fontBold, accent, contentLeft, contentWidth);
+    drawCenteredText(page, schoolAddress, headerTop - 18, 9, font, muted, contentLeft, contentWidth);
+    drawCenteredText(page, `${schoolContact}   ${schoolWebsite}`, headerTop - 32, 9, font, muted, contentLeft, contentWidth);
 
-    const lines = [
-      ["Receipt No", invoice.invoice_no || "-"],
-      ["Date", formatDateDDMMYYYY(invoice.date || "")],
-      ["Student ID", invoice.student_id || "-"],
-      ["Student Name", invoice.student_name || "-"],
-      ["Course", invoice.course || "-"],
-      ["Payment ID", invoice.payment_id || "-"],
-      ["Order ID", invoice.order_id || "-"],
-      ["Amount Paid", `INR ${formatMoney(invoice.amount_paid || 0)}`],
-      ["Total Fee", `INR ${formatMoney(invoice.amount_total || 0)}`],
-      ["Remaining", `INR ${formatMoney(invoice.balance_due || 0)}`],
-    ];
+    const titleText = `Fee Receipt (${getAcademicYearLabel(invoice.date)}) - ${copyLabel}`;
+    const titleY = headerTop - 64;
+    const titleWidth = Math.min(measureText(titleText, fontBold, 11) + 20, contentWidth);
+    const titleX = contentLeft + (contentWidth - titleWidth) / 2;
+    page.drawRectangle({ x: titleX, y: titleY - 6, width: titleWidth, height: 20, borderColor: border, borderWidth: 1 });
+    drawCenteredText(page, titleText, titleY, 11, fontBold, text, titleX, titleWidth);
 
-    let y = 640;
-    for (const [k, v] of lines) {
-      page.drawText(`${k}:`, { x: 42, y, size: 12, font: fontBold, color: muted });
-      page.drawText(String(v), { x: 180, y, size: 12, font, color: rgb(0.08, 0.08, 0.08) });
-      y -= 28;
+    const infoY = titleY - 34;
+    page.drawText(`Receipt No: ${invoice.invoice_no || "-"}`, { x: contentLeft, y: infoY, size: 10.5, font: fontBold, color: text });
+    drawCenteredText(page, `Admission No: ${invoice.student_id || "-"}`, infoY, 10.5, fontBold, text, contentLeft, contentWidth);
+    drawAlignedText(page, `Date: ${formatDateDDMMYYYY(invoice.date || "")}`, contentLeft, infoY, contentWidth, "right", 10.5, fontBold, text);
+
+    const infoY2 = infoY - 18;
+    page.drawText(`Name: ${invoice.student_name || "-"}`, { x: contentLeft, y: infoY2, size: 10.5, font: fontBold, color: text });
+    drawAlignedText(page, `ClassName: ${invoice.course || "-"}`, contentLeft, infoY2, contentWidth, "right", 10.5, fontBold, text);
+
+    const tableTop = infoY2 - 26;
+    const colWidths = [35, 200, 75, 75, 90, 36];
+    const headers = ["No", "Description", "Total Due", "Concession", "Amount Paid (in Rs.)", "Balance"];
+    const rowHeight = 26;
+    const totalTableHeight = rowHeight * 3;
+
+    page.drawRectangle({ x: contentLeft, y: tableTop - totalTableHeight, width: contentWidth, height: totalTableHeight, borderColor: border, borderWidth: 1 });
+    page.drawLine({ start: { x: contentLeft, y: tableTop - rowHeight }, end: { x: contentRight, y: tableTop - rowHeight }, thickness: 0.8, color: border });
+    page.drawLine({ start: { x: contentLeft, y: tableTop - rowHeight * 2 }, end: { x: contentRight, y: tableTop - rowHeight * 2 }, thickness: 0.8, color: border });
+
+    let colX = contentLeft;
+    for (let i = 0; i < colWidths.length; i += 1) {
+      if (i > 0) {
+        page.drawLine({ start: { x: colX, y: tableTop }, end: { x: colX, y: tableTop - totalTableHeight }, thickness: 0.8, color: border });
+      }
+      drawAlignedText(page, headers[i], colX, tableTop - 18, colWidths[i], "center", 9, fontBold, text);
+      colX += colWidths[i];
     }
 
-    page.drawText("Arunand's Aviation Institute", {
-      x: 42,
-      y: 80,
-      size: 11,
-      font: fontBold,
-      color: accent,
-    });
-    page.drawText("Thank you for your payment.", {
-      x: 42,
-      y: 62,
-      size: 10,
+    const concessionAmount = Number(invoice.concession_amount || 0);
+    const amountTotal = Number(invoice.amount_total || 0);
+    const amountPaid = Number(invoice.amount_paid || 0);
+    const rowBalance = Math.max(amountTotal - amountPaid - concessionAmount, 0);
+    const description = invoice.fee_description || `${invoice.course || "Course"} Fees`;
+
+    const rowY = tableTop - rowHeight - 18;
+    colX = contentLeft;
+    const rowValues = [
+      "1",
+      description,
+      formatMoney(amountTotal),
+      formatMoney(concessionAmount),
+      formatMoney(amountPaid),
+      formatMoney(rowBalance)
+    ];
+    for (let i = 0; i < colWidths.length; i += 1) {
+      const align = i === 1 ? "left" : "center";
+      const textX = colX + (align === "left" ? 4 : 0);
+      const maxWidth = colWidths[i] - (align === "left" ? 8 : 4);
+      const lines = i === 1 ? wrapText(rowValues[i], maxWidth, font, 9) : [rowValues[i]];
+      lines.forEach((line, idx) => {
+        drawAlignedText(page, line, textX, rowY - idx * 10, maxWidth, align, 9, font, text);
+      });
+      colX += colWidths[i];
+    }
+
+    const totalRowY = tableTop - rowHeight * 2 - 18;
+    colX = contentLeft;
+    const totalValues = ["", "Total", formatMoney(amountTotal), formatMoney(concessionAmount), formatMoney(amountPaid), formatMoney(rowBalance)];
+    for (let i = 0; i < colWidths.length; i += 1) {
+      const align = i === 1 ? "center" : "center";
+      const label = totalValues[i];
+      if (!label) {
+        colX += colWidths[i];
+        continue;
+      }
+      drawAlignedText(page, label, colX, totalRowY, colWidths[i], align, 9, fontBold, text);
+      colX += colWidths[i];
+    }
+
+    const balanceBoxY = tableTop - totalTableHeight - 24;
+    page.drawRectangle({ x: contentLeft, y: balanceBoxY, width: contentWidth, height: 22, borderColor: border, borderWidth: 1 });
+    drawAlignedText(page, "Total Fee Balance:", contentLeft + 6, balanceBoxY + 7, contentWidth - 80, "right", 9.5, fontBold, text);
+    drawAlignedText(page, formatMoney(Number(invoice.balance_due || 0)), contentRight - 70, balanceBoxY + 7, 64, "right", 9.5, fontBold, text);
+
+    const modeY = balanceBoxY - 26;
+    const modeCols = [140, 170, 90, contentWidth - 400];
+    page.drawRectangle({ x: contentLeft, y: modeY, width: contentWidth, height: 22, borderColor: border, borderWidth: 1 });
+    let modeX = contentLeft;
+    page.drawLine({ start: { x: modeX + modeCols[0], y: modeY }, end: { x: modeX + modeCols[0], y: modeY + 22 }, thickness: 0.8, color: border });
+    page.drawLine({ start: { x: modeX + modeCols[0] + modeCols[1], y: modeY }, end: { x: modeX + modeCols[0] + modeCols[1], y: modeY + 22 }, thickness: 0.8, color: border });
+    page.drawLine({ start: { x: modeX + modeCols[0] + modeCols[1] + modeCols[2], y: modeY }, end: { x: modeX + modeCols[0] + modeCols[1] + modeCols[2], y: modeY + 22 }, thickness: 0.8, color: border });
+    const isOnline = Boolean(invoice.payment_id || invoice.order_id);
+    drawAlignedText(page, "Payment Mode:", modeX + 6, modeY + 7, modeCols[0] - 12, "left", 9, fontBold, text);
+    drawAlignedText(page, isOnline ? "ONLINE" : "OFFLINE", modeX + modeCols[0], modeY + 7, modeCols[1], "center", 9, fontBold, text);
+    drawAlignedText(page, "Discount:", modeX + modeCols[0] + modeCols[1] + 6, modeY + 7, modeCols[2] - 12, "left", 9, fontBold, text);
+    drawAlignedText(page, formatMoney(concessionAmount), modeX + modeCols[0] + modeCols[1] + modeCols[2], modeY + 7, modeCols[3], "center", 9, fontBold, text);
+
+    const detailsTop = modeY - 26;
+    page.drawRectangle({ x: contentLeft, y: detailsTop, width: contentWidth, height: 66, borderColor: border, borderWidth: 1 });
+    drawCenteredText(page, "Payment Details", detailsTop + 50, 10, fontBold, text, contentLeft, contentWidth);
+    page.drawLine({ start: { x: contentLeft, y: detailsTop + 44 }, end: { x: contentRight, y: detailsTop + 44 }, thickness: 0.8, color: border });
+    page.drawLine({ start: { x: contentLeft, y: detailsTop + 22 }, end: { x: contentRight, y: detailsTop + 22 }, thickness: 0.8, color: border });
+
+    const detailCols = [120, 150, 110, contentWidth - 380];
+    let dx = contentLeft;
+    for (let i = 0; i < detailCols.length - 1; i += 1) {
+      dx += detailCols[i];
+      page.drawLine({ start: { x: dx, y: detailsTop }, end: { x: dx, y: detailsTop + 44 }, thickness: 0.8, color: border });
+    }
+
+    const paymentId = invoice.payment_id || "NA";
+    const orderId = invoice.order_id || "NA";
+    const bankName = isOnline ? "Razorpay" : "Cash";
+    drawAlignedText(page, "Bank Name", contentLeft + 6, detailsTop + 30, detailCols[0] - 12, "left", 9, fontBold, text);
+    drawAlignedText(page, bankName, contentLeft + detailCols[0], detailsTop + 30, detailCols[1], "center", 9, font, text);
+    drawAlignedText(page, "Txn / UTR No", contentLeft + detailCols[0] + detailCols[1] + 6, detailsTop + 30, detailCols[2] - 12, "left", 9, fontBold, text);
+    drawAlignedText(page, paymentId, contentLeft + detailCols[0] + detailCols[1] + detailCols[2], detailsTop + 30, detailCols[3], "center", 9, font, text);
+
+    drawAlignedText(page, "Bank Ref No", contentLeft + 6, detailsTop + 8, detailCols[0] - 12, "left", 9, fontBold, text);
+    drawAlignedText(page, orderId, contentLeft + detailCols[0], detailsTop + 8, detailCols[1], "center", 9, font, text);
+    drawAlignedText(page, "Transaction Type", contentLeft + detailCols[0] + detailCols[1] + 6, detailsTop + 8, detailCols[2] - 12, "left", 9, fontBold, text);
+    drawAlignedText(page, isOnline ? "ONLINE" : "OFFLINE", contentLeft + detailCols[0] + detailCols[1] + detailCols[2], detailsTop + 8, detailCols[3], "center", 9, font, text);
+
+    const wordsY = detailsTop - 26;
+    page.drawRectangle({ x: contentLeft, y: wordsY, width: contentWidth, height: 22, borderColor: border, borderWidth: 1 });
+    drawAlignedText(page, "In Words (Rs)", contentLeft + 6, wordsY + 7, 110, "left", 9, fontBold, text);
+    const wordsLine = wrapText(amountToWords(amountPaid), contentWidth - 130, font, 9)[0];
+    drawAlignedText(page, wordsLine, contentLeft + 120, wordsY + 7, contentWidth - 130, "left", 9, font, text);
+
+    const remarksY = wordsY - 26;
+    page.drawRectangle({ x: contentLeft, y: remarksY, width: contentWidth, height: 22, borderColor: border, borderWidth: 1 });
+    drawAlignedText(page, "Remarks:", contentLeft + 6, remarksY + 7, 90, "left", 9, fontBold, text);
+    const remarksLine = wrapText(invoice.remarks || "-", contentWidth - 110, font, 9)[0];
+    drawAlignedText(page, remarksLine, contentLeft + 100, remarksY + 7, contentWidth - 110, "left", 9, font, text);
+
+    const noteY = remarksY - 28;
+    page.drawText("Note: All payments are non-refundable. Cheque payments are subject to realisation.", {
+      x: contentLeft,
+      y: noteY,
+      size: 9,
       font,
-      color: dim,
+      color: dim
+    });
+    page.drawText("This is a computer generated receipt. Hence no signature is required.", {
+      x: contentLeft,
+      y: noteY - 12,
+      size: 9,
+      font,
+      color: dim
     });
 
-    page.drawText("Authorized Signature", { x: 42, y: 110, size: 10, font: fontBold, color: muted });
-    page.drawLine({ start: { x: 42, y: 104 }, end: { x: 220, y: 104 }, thickness: 0.6, color: muted });
-    page.drawText("Student Signature", { x: 300, y: 110, size: 10, font: fontBold, color: muted });
-    page.drawLine({ start: { x: 300, y: 104 }, end: { x: 553, y: 104 }, thickness: 0.6, color: muted });
+    drawAlignedText(page, "Cashier", contentLeft, 60, contentWidth, "right", 9.5, fontBold, text);
   };
 
   drawReceiptPage("Student Copy");
