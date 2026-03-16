@@ -34,7 +34,6 @@ It helps you:
 ## Main Features
 
 - Role-based login:
-  - `superuser` can manage everyone.
   - Students can see only their own data.
 - Attendance:
   - Mark attendance from the web UI.
@@ -80,9 +79,6 @@ Backend URL used by frontend:
 
 ## Default Login (Local Demo)
 
-- Superuser:
-  - Username: `superuser`
-  - Password: `qwerty`
 - Students:
   - Username: student ID
   - Password: generated in `passwords.txt` (local file, gitignored)
