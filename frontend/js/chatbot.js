@@ -1,33 +1,57 @@
-import { API, chatbotState } from "./app-core.js?v=20260311b";
+import { API } from "./config.js";
+import { state } from "./state.js";
 
-function addChatbotMessage(role, text) {
+export function initChatbot() {
   const messages = document.getElementById("chatbotMessages");
-  if (!messages) return;
-  const div = document.createElement("div");
-  div.className = `chatbot-bubble ${role}`;
-  div.textContent = text;
-  messages.appendChild(div);
-  messages.scrollTop = messages.scrollHeight;
+  if (!messages || state.chatbotState.initialized) return;
+  state.chatbotState.initialized = true;
+  addChatbotMessage("bot", "Hello! Welcome to Arunand's Aviation Academy - Bangalore.");
+  addChatbotMessage("bot", "I can help with courses, fees, eligibility, admissions, and counselor connect.");
+  addChatbotMessage("bot", "To personalize this, what's your name?");
+  state.chatbotState.step = "ask_name";
+  const input = document.getElementById("chatbotInput");
+  input?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      sendChatbotMessage();
+    }
+  });
 }
 
-function toggleChatbot() {
+export function toggleChatbot() {
   const panel = document.getElementById("chatbotPanel");
   if (!panel) return;
   panel.classList.toggle("hidden");
   if (!panel.classList.contains("hidden")) {
+    initChatbot();
     document.getElementById("chatbotInput")?.focus();
   }
 }
 
+export function addChatbotMessage(role, text) {
+  const messages = document.getElementById("chatbotMessages");
+  if (!messages) return;
+  const bubble = document.createElement("div");
+  bubble.className = `chatbot-bubble ${role === "user" ? "user" : "bot"}`;
+  bubble.textContent = text;
+  messages.appendChild(bubble);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function extractPhoneNumber(text) {
+  const digits = String(text || "").replace(/\D/g, "");
+  return /^\d{10}$/.test(digits) ? digits : "";
+}
+
 async function submitChatbotLead() {
   const payload = {
-    name: chatbotState.profile.name,
-    age: chatbotState.profile.age,
-    qualification: chatbotState.profile.qualification,
-    location: chatbotState.profile.location,
-    phone: chatbotState.profile.phone,
-    preferred_time: chatbotState.profile.preferred_time,
-    intent: chatbotState.intent,
+    name: state.chatbotState.profile.name,
+    age: state.chatbotState.profile.age,
+    qualification: state.chatbotState.profile.qualification,
+    location: state.chatbotState.profile.location,
+    phone: state.chatbotState.profile.phone,
+    preferred_time: state.chatbotState.profile.preferred_time,
+    intent: state.chatbotState.intent,
   };
   const res = await fetch(`${API}/leads`, {
     method: "POST",
@@ -43,37 +67,7 @@ async function submitChatbotLead() {
   return true;
 }
 
-function isValidPhone(value) {
-  return /^\d{10}$/.test(String(value || "").trim());
-}
-
-async function askChatbotAi(message) {
-  try {
-    const res = await fetch(`${API}/chatbot/ask`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message,
-        intent: chatbotState.intent,
-        profile: {
-          name: chatbotState.profile.name,
-          age: chatbotState.profile.age,
-          qualification: chatbotState.profile.qualification,
-          location: chatbotState.profile.location,
-          phone: chatbotState.profile.phone,
-          preferred_time: chatbotState.profile.preferred_time,
-        },
-      }),
-    });
-    if (!res.ok) return "";
-    const data = await res.json().catch(() => ({}));
-    return String(data.reply || "").trim();
-  } catch (_) {
-    return "";
-  }
-}
-
-async function sendChatbotMessage() {
+export async function sendChatbotMessage() {
   const input = document.getElementById("chatbotInput");
   const text = String(input?.value || "").trim();
   if (!text) return;
@@ -82,191 +76,111 @@ async function sendChatbotMessage() {
 
   const lower = text.toLowerCase();
 
-  if (chatbotState.step === "ask_name") {
-    chatbotState.profile.name = text.split(" ")[0] || text;
-    chatbotState.step = "ask_age";
-    addChatbotMessage("bot", `Nice to meet you, ${chatbotState.profile.name}. What's your age?`);
+  if (state.chatbotState.step === "ask_name") {
+    state.chatbotState.profile.name = text.split(" ")[0] || text;
+    state.chatbotState.step = "ask_age";
+    addChatbotMessage("bot", `Nice to meet you, ${state.chatbotState.profile.name}. What's your age?`);
     return;
   }
 
-  if (chatbotState.step === "ask_age") {
+  if (state.chatbotState.step === "ask_age") {
     const ageMatch = text.match(/\d{2}/);
-    chatbotState.profile.age = ageMatch ? ageMatch[0] : text;
-    chatbotState.step = "ask_qualification";
+    state.chatbotState.profile.age = ageMatch ? ageMatch[0] : text;
+    state.chatbotState.step = "ask_qualification";
     addChatbotMessage("bot", "Thanks. What's your highest qualification?");
     return;
   }
 
-  if (chatbotState.step === "ask_qualification") {
-    chatbotState.profile.qualification = text;
-    chatbotState.step = "ask_location";
+  if (state.chatbotState.step === "ask_qualification") {
+    state.chatbotState.profile.qualification = text;
+    state.chatbotState.step = "ask_location";
     addChatbotMessage("bot", "Got it. Which city or location are you from?");
     return;
   }
 
-  if (chatbotState.step === "ask_location") {
-    chatbotState.profile.location = text;
-    chatbotState.step = "menu";
+  if (state.chatbotState.step === "ask_location") {
+    state.chatbotState.profile.location = text;
+    state.chatbotState.step = "menu";
     addChatbotMessage(
       "bot",
-      `Thanks ${chatbotState.profile.name}. How can I help you next?\n1. Register your details\n2. Course Details\n3. Fees\n4. Eligibility\n5. Talk to Counsellor\n6. Christmas & New Year Offers`
+      `Thanks ${state.chatbotState.profile.name}. How can I help you next?\n1. Register your details\n2. Course Details\n3. Fees\n4. Eligibility\n5. Talk to Counsellor\n6. Christmas & New Year Offers`
     );
     return;
   }
 
-  if (chatbotState.step === "ask_phone") {
-    if (!isValidPhone(text)) {
-      addChatbotMessage("bot", "Please enter a valid 10 digit phone number.");
+  if (state.chatbotState.step === "ask_phone") {
+    const phone = extractPhoneNumber(text);
+    if (!phone) {
+      addChatbotMessage("bot", "Please share a valid 10 digit phone number.");
       return;
     }
-    chatbotState.profile.phone = text;
-    chatbotState.step = "ask_time";
+    state.chatbotState.profile.phone = phone;
+    state.chatbotState.step = "ask_time";
     addChatbotMessage("bot", "Thanks. What is your preferred time to receive a call?");
     return;
   }
 
-  if (chatbotState.step === "ask_time") {
-    chatbotState.profile.preferred_time = text;
-    chatbotState.step = "menu";
-    await submitChatbotLead();
-    addChatbotMessage("bot", "Anything else I can help with?\n1. Register your details\n2. Course Details\n3. Fees\n4. Eligibility\n5. Talk to Counsellor\n6. Christmas & New Year Offers");
+  if (state.chatbotState.step === "ask_time") {
+    state.chatbotState.profile.preferred_time = text;
+    const ok = await submitChatbotLead();
+    if (ok) {
+      state.chatbotState.step = "menu";
+      addChatbotMessage("bot", "Anything else I can help you with? You can type 1-6 or say 'fees', 'courses', etc.");
+    }
     return;
   }
 
-  if (chatbotState.step === "menu") {
-    const phoneInline = lower.match(/\b\d{10}\b/)?.[0] || "";
-    if (lower.includes("register") || lower.includes("admission") || lower === "1") {
-      chatbotState.intent = "register";
-      chatbotState.step = "ask_phone";
+  if (state.chatbotState.step === "menu") {
+    const choice = text.replace(/[^\d]/g, "");
+    const phoneInline = extractPhoneNumber(text);
+    if (choice === "1" || /register|details/.test(lower)) {
+      state.chatbotState.intent = "register";
+      state.chatbotState.step = "ask_phone";
       if (phoneInline) {
-        chatbotState.profile.phone = phoneInline;
-        chatbotState.step = "ask_time";
+        state.chatbotState.profile.phone = phoneInline;
+        state.chatbotState.step = "ask_time";
         addChatbotMessage("bot", "Thanks. What is your preferred time to receive a call?");
         return;
       }
       addChatbotMessage("bot", "Please share your 10 digit phone number.");
       return;
     }
-    if (lower.includes("course") || lower === "2") {
+    if (choice === "2" || /course|courses/.test(lower)) {
       addChatbotMessage("bot", "We offer Ground Operations and Cabin Crew.\nWould you like details for a specific course?");
       return;
     }
-    if (lower.includes("fee") || lower === "3") {
-      addChatbotMessage("bot", "Fees are INR 1,50,000. We also offer installment options.\nWould you like the fee breakup?");
+    if (choice === "3" || /fee|fees|cost|price/.test(lower)) {
+      addChatbotMessage("bot", "Fees are INR 1.5L. We also offer installment options.\nWould you like the fee breakup?");
       return;
     }
-    if (lower.includes("elig") || lower === "4") {
+    if (choice === "4" || /eligibility|eligible|criteria/.test(lower)) {
       addChatbotMessage("bot", "Eligibility typically requires 10+2 pass and good communication skills.\nWant the detailed criteria for Ground Operations or Cabin Crew?");
       return;
     }
-    if (
-      lower.includes("duration") ||
-      lower.includes("how long") ||
-      lower.includes("months") ||
-      lower.includes("length")
-    ) {
-      addChatbotMessage("bot", "Ground Operations is 3 months. Cabin Crew is 3.5 months.\nWant the syllabus highlights?");
-      return;
-    }
-    if (
-      lower.includes("admission") ||
-      lower.includes("apply") ||
-      lower.includes("enroll") ||
-      lower.includes("enrol") ||
-      lower.includes("join") ||
-      lower.includes("process")
-    ) {
-      addChatbotMessage(
-        "bot",
-        "Admission is simple: fill the form, submit documents, pay the initial fee, and we confirm your batch.\nNeed help with the form?"
-      );
-      return;
-    }
-    if (lower.includes("document") || lower.includes("aadhaar") || lower.includes("marksheet") || lower.includes("id")) {
-      addChatbotMessage(
-        "bot",
-        "Documents typically include 10th/12th marksheets, Aadhaar/ID proof, and passport-size photos.\nWant a counsellor to guide you?"
-      );
-      return;
-    }
-    if (lower.includes("address") || lower.includes("location") || lower.includes("campus") || lower.includes("where")) {
-      addChatbotMessage(
-        "bot",
-        "We are based in Bangalore. Share your location and we can help with directions."
-      );
-      return;
-    }
-    if (
-      lower.includes("timing") ||
-      lower.includes("time") ||
-      lower.includes("batch") ||
-      lower.includes("schedule") ||
-      lower.includes("weekday") ||
-      lower.includes("weekend")
-    ) {
-      addChatbotMessage(
-        "bot",
-        "Batch timings vary. Tell me your preferred time and we can share the closest schedule."
-      );
-      return;
-    }
-    if (lower.includes("placement") || lower.includes("job") || lower.includes("career") || lower.includes("salary")) {
-      addChatbotMessage(
-        "bot",
-        "We provide interview prep and placement support, with guidance on airline hiring processes.\nWant to speak to a counsellor?"
-      );
-      return;
-    }
-    if (lower.includes("counsellor") || lower.includes("counselor") || lower === "5") {
-      chatbotState.intent = "counsellor";
-      chatbotState.step = "ask_phone";
+    if (choice === "5" || /counsellor|counselor|call|talk/.test(lower)) {
+      state.chatbotState.intent = "counsellor";
+      state.chatbotState.step = "ask_phone";
       if (phoneInline) {
-        chatbotState.profile.phone = phoneInline;
-        chatbotState.step = "ask_time";
+        state.chatbotState.profile.phone = phoneInline;
+        state.chatbotState.step = "ask_time";
         addChatbotMessage("bot", "Thanks. What is your preferred time to receive a call?");
         return;
       }
       addChatbotMessage("bot", "Sure. Please share your 10 digit phone number.");
       return;
     }
-    if (lower.includes("offer") || lower.includes("christmas") || lower.includes("new year") || lower === "6") {
-      chatbotState.intent = "offers";
-      chatbotState.step = "ask_phone";
+    if (choice === "6" || /offer|offers|discount|new year|christmas/.test(lower)) {
+      state.chatbotState.intent = "offers";
+      state.chatbotState.step = "ask_phone";
       if (phoneInline) {
-        chatbotState.profile.phone = phoneInline;
-        chatbotState.step = "ask_time";
+        state.chatbotState.profile.phone = phoneInline;
+        state.chatbotState.step = "ask_time";
         addChatbotMessage("bot", "Thanks. What is your preferred time to receive a call?");
         return;
       }
       addChatbotMessage("bot", "We have seasonal offers. Please share your 10 digit phone number.");
       return;
     }
-    const aiReply = await askChatbotAi(text);
-    if (aiReply) {
-      addChatbotMessage("bot", aiReply);
-      return;
-    }
     addChatbotMessage("bot", "You can type a number (1-6) or say things like 'fees', 'courses', or 'talk to counsellor'.");
   }
 }
-
-function initChatbot() {
-  const messages = document.getElementById("chatbotMessages");
-  if (!messages || chatbotState.initialized) return;
-  chatbotState.initialized = true;
-  addChatbotMessage("bot", "Hello! Welcome to Arunand's Aviation Academy - Bangalore.");
-  addChatbotMessage("bot", "I can help with courses, fees, eligibility, admissions, and counselor connect.");
-  addChatbotMessage("bot", "To personalize this, what's your name?");
-  chatbotState.step = "ask_name";
-  const input = document.getElementById("chatbotInput");
-  input?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      sendChatbotMessage();
-    }
-  });
-}
-
-export { initChatbot, toggleChatbot, sendChatbotMessage };
-
-

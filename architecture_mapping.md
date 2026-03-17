@@ -13,8 +13,8 @@ The frontend is a single-page application (SPA) that can communicate with either
 | :--- | :--- | :--- | :--- |
 | Auth/Login | Yes | Yes | Equivalent |
 | Student Management | Yes | Yes | Equivalent |
-| Attendance | Yes | Yes + `/attendance/month` | Discrepancy (Month view) |
-| Fees | Yes | Yes + Reminders | Discrepancy (Reminders) |
+| Attendance | Yes | Yes | Equivalent |
+| Fees | Yes | Yes | Equivalent |
 | Profile | Yes | Yes | Equivalent |
 | Timetable | Yes | Yes | Equivalent |
 | Interviews | Yes | Yes | Equivalent |
@@ -22,10 +22,10 @@ The frontend is a single-page application (SPA) that can communicate with either
 | Notifications | Yes | Yes | Equivalent |
 | Admissions | Yes | Yes + Photo/PDF Replace | Discrepancy (Photo/PDF) |
 | Activity Logs | Yes | Yes | Equivalent |
-| **Tests** | **No** | **Yes** | **Missing in FastAPI** |
-| **Leads** | **No** | **Yes** | **Missing in FastAPI** |
-| **Chatbot** | **No** | **Yes** | **Missing in FastAPI** |
-| **Parent Portal** | **No** | **Yes** | **Missing in FastAPI** |
+| **Tests** | Yes | Yes | Equivalent |
+| **Leads** | Yes | Yes | Equivalent |
+| **Chatbot** | Yes | Yes | Equivalent |
+| **Parent Portal** | Yes | Yes | Equivalent |
 
 ## Frontend Modularization
 The frontend was originally in a single `frontend/app.js` file. It has been partially or fully migrated to modular scripts in `frontend/js/`.
@@ -34,17 +34,16 @@ The frontend was originally in a single `frontend/app.js` file. It has been part
 - `frontend/js/main.js` imports all other modules and attaches them to the `window` object to maintain compatibility with inline event handlers in `index.html`.
 
 
-## Frontend Modularization Analysis
-The codebase contains both `frontend/app.js` (legacy monolithic) and a modular structure in `frontend/js/`.
+## Frontend Modularization Status
+The frontend has been fully refactored from legacy monolithic files (`frontend/app.js` and `frontend/js/app-core.js`) into a granular modular structure within `frontend/js/`.
 
-- `frontend/js/app-core.js` contains the bulk of the logic, similar in size to `app.js`.
-- `frontend/js/attendance.js`, `frontend/js/chatbot.js`, etc., re-export from `app-core.js` or implement specialized logic.
-- `frontend/index.html` currently uses modular loading:
+- **Module Structure**: Business logic is decoupled into ~20 specific modules (e.g., `auth.js`, `attendance.js`, `pdf.js`, `chatbot.js`).
+- **Global Compatibility**: `frontend/js/main.js` serves as the entry point, aggregating all modules and exposing necessary functions to the `window` object to maintain compatibility with existing inline HTML event handlers.
+- **Loading Mechanism**: `frontend/index.html` loads the application via an ES module import:
   ```html
   <script type="module">
     import(`/js/main.js?v=${Date.now()}`)
       .then(() => { window.__APP_READY__ = true; })
   ```
-- Many modular files (`students.js`, `fees.js`, `tests.js`, `pdf.js`, `ui.js`) currently only re-export from `app-core.js`, suggesting that the migration is ongoing or that `app-core.js` acts as a shared library.
 
-**Recommendation**: `frontend/app.js` appears to be redundant and could likely be removed to avoid confusion, provided `app-core.js` fully covers its functionality.
+**Outcome**: Monolithic legacy files have been removed. The modular architecture improves maintainability while preserving full feature parity.

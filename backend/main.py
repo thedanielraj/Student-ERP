@@ -224,6 +224,55 @@ class StudentIdsRequest(BaseModel):
     student_ids: List[str]
 
 
+class LeadRequest(BaseModel):
+    name: str = ""
+    age: str = ""
+    qualification: str = ""
+    location: str = ""
+    phone: str
+    preferred_time: str = ""
+    intent: str = ""
+
+
+class LeadFollowupRequest(BaseModel):
+    followup_date: str
+
+
+class TestQuestionRequest(BaseModel):
+    question_text: str
+    option_a: str
+    option_b: str
+    option_c: str
+    option_d: str
+    correct_answer: str
+
+
+class TestCreateRequest(BaseModel):
+    title: str
+    description: str = ""
+    duration_minutes: int = 30
+    questions: List[TestQuestionRequest]
+    assigned_students: List[str] = []
+
+
+class TestSubmissionRequest(BaseModel):
+    answers: List[dict]
+
+
+class MalpracticeRequest(BaseModel):
+    event_type: str
+    details: str = ""
+
+
+class ParentLinkRequest(BaseModel):
+    student_id: str
+    days: int = 30
+
+
+class FeeRemindersRequest(BaseModel):
+    days: int = 7
+
+
 class StudentsBulkBatchRequest(BaseModel):
     student_ids: List[str]
     batch: str
@@ -317,6 +366,140 @@ def _ensure_activity_table():
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             undone INTEGER NOT NULL DEFAULT 0,
             undone_at TEXT
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+def _ensure_parent_links_table():
+    conn = get_connection()
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS parent_links (
+            token TEXT PRIMARY KEY,
+            student_id TEXT NOT NULL,
+            expires_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            created_by TEXT
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+def _ensure_leads_table():
+    conn = get_connection()
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS leads (
+            lead_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            age TEXT,
+            qualification TEXT,
+            location TEXT,
+            phone TEXT,
+            preferred_time TEXT,
+            intent TEXT,
+            source TEXT,
+            last_message TEXT,
+            last_reply TEXT,
+            last_intent TEXT,
+            updated_at TEXT,
+            status TEXT NOT NULL DEFAULT 'new',
+            contacted_at TEXT,
+            followup_date TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+def _ensure_tests_tables():
+    conn = get_connection()
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tests (
+            test_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT,
+            duration_minutes INTEGER NOT NULL DEFAULT 30,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS test_questions (
+            question_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            test_id INTEGER NOT NULL,
+            question_order INTEGER NOT NULL,
+            question_text TEXT NOT NULL,
+            question_type TEXT NOT NULL DEFAULT 'mcq',
+            option_a TEXT,
+            option_b TEXT,
+            option_c TEXT,
+            option_d TEXT,
+            correct_answer TEXT,
+            points INTEGER NOT NULL DEFAULT 1,
+            FOREIGN KEY (test_id) REFERENCES tests(test_id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS test_assignments (
+            test_id INTEGER NOT NULL,
+            student_id TEXT NOT NULL,
+            assigned_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (test_id, student_id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS test_attempts (
+            attempt_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            test_id INTEGER NOT NULL,
+            student_id TEXT NOT NULL,
+            start_time TEXT NOT NULL DEFAULT (datetime('now')),
+            submitted_at TEXT,
+            status TEXT NOT NULL DEFAULT 'in_progress',
+            score REAL NOT NULL DEFAULT 0,
+            total_points REAL NOT NULL DEFAULT 0,
+            malpractice_count INTEGER NOT NULL DEFAULT 0,
+            malpractice_flag INTEGER NOT NULL DEFAULT 0,
+            question_order_json TEXT NOT NULL DEFAULT '[]',
+            option_order_json TEXT NOT NULL DEFAULT '{}'
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS test_attempt_answers (
+            answer_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            attempt_id INTEGER NOT NULL,
+            question_id INTEGER NOT NULL,
+            answer_text TEXT,
+            is_correct INTEGER NOT NULL DEFAULT 0,
+            points_awarded REAL NOT NULL DEFAULT 0
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS test_malpractice_events (
+            event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            attempt_id INTEGER NOT NULL,
+            event_type TEXT NOT NULL,
+            details TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
         """
     )
@@ -492,7 +675,7 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
     if request.method == "OPTIONS":
         return await call_next(request)
-    if path in ["/", "/login", "/auth/me", "/public/student-ids", "/public/alumni", "/admissions/apply", "/docs", "/openapi.json", "/style.css", "/app.js"] or path.startswith("/static"):
+    if path in ["/", "/login", "/auth/me", "/public/student-ids", "/public/alumni", "/admissions/apply", "/docs", "/openapi.json", "/style.css"] or path.startswith("/static") or path.startswith("/js/") or path.startswith("/assets/"):
         return await call_next(request)
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
@@ -558,16 +741,14 @@ def home():
     return FileResponse(FRONTEND_DIR / "index.html")
 
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+app.mount("/js", StaticFiles(directory=FRONTEND_DIR / "js"), name="js")
+app.mount("/assets", StaticFiles(directory=FRONTEND_DIR / "assets"), name="assets")
 
 
 @app.get("/style.css")
 def style_file():
     return FileResponse(FRONTEND_DIR / "style.css")
 
-
-@app.get("/app.js")
-def app_file():
-    return FileResponse(FRONTEND_DIR / "app.js")
 
 @app.get("/public/student-ids")
 def public_student_ids():
@@ -803,6 +984,136 @@ def admissions_list(request: Request):
             }
         )
     return out
+
+
+@app.post("/leads")
+def create_lead(payload: LeadRequest):
+    _ensure_leads_table()
+    conn = get_connection()
+    conn.execute(
+        """
+        INSERT INTO leads (name, age, qualification, location, phone, preferred_time, intent, source, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'inquiry', datetime('now'))
+        """,
+        (payload.name, payload.age, payload.qualification, payload.location, payload.phone, payload.preferred_time, payload.intent),
+    )
+    conn.commit()
+    conn.close()
+    return {"status": "ok", "message": "Lead captured"}
+
+
+@app.get("/leads")
+def list_leads(request: Request):
+    user = _get_current_user(request)
+    _require_superuser(user)
+    _ensure_leads_table()
+    conn = get_connection()
+    rows = conn.execute("SELECT * FROM leads ORDER BY lead_id DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.post("/leads/{lead_id}/contacted")
+def mark_lead_contacted(lead_id: int, request: Request):
+    user = _get_current_user(request)
+    _require_superuser(user)
+    _ensure_leads_table()
+    conn = get_connection()
+    conn.execute(
+        "UPDATE leads SET status = 'contacted', contacted_at = datetime('now') WHERE lead_id = ?",
+        (lead_id,),
+    )
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+
+@app.post("/leads/{lead_id}/not-interested")
+def mark_lead_not_interested(lead_id: int, request: Request):
+    user = _get_current_user(request)
+    _require_superuser(user)
+    _ensure_leads_table()
+    conn = get_connection()
+    conn.execute(
+        "UPDATE leads SET status = 'not_interested' WHERE lead_id = ?",
+        (lead_id,),
+    )
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+
+@app.post("/leads/{lead_id}/followup")
+def set_lead_followup(lead_id: int, payload: LeadFollowupRequest, request: Request):
+    user = _get_current_user(request)
+    _require_superuser(user)
+    _ensure_leads_table()
+    conn = get_connection()
+    conn.execute(
+        "UPDATE leads SET followup_date = ? WHERE lead_id = ?",
+        (payload.followup_date, lead_id),
+    )
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+
+@app.post("/parent/link")
+def create_parent_link(payload: ParentLinkRequest, request: Request):
+    user = _get_current_user(request)
+    _require_superuser(user)
+    _ensure_parent_links_table()
+    token = uuid4().hex
+    expires_at = (Path(__file__).resolve().parent.parent / "frontend").exists() # Just a dummy check for now
+    from datetime import datetime, timedelta
+    expires_dt = datetime.now() + timedelta(days=payload.days)
+    expires_at_str = expires_dt.strftime("%Y-%m-%d")
+
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO parent_links (token, student_id, expires_at, created_by) VALUES (?, ?, ?, ?)",
+        (token, payload.student_id, expires_at_str, user["user"]),
+    )
+    conn.commit()
+    conn.close()
+    return {"status": "ok", "token": token, "student_id": payload.student_id, "expires_at": expires_at_str}
+
+
+@app.get("/parent/summary")
+def parent_summary(token: str):
+    _ensure_parent_links_table()
+    conn = get_connection()
+    link = conn.execute("SELECT student_id, expires_at FROM parent_links WHERE token = ?", (token,)).fetchone()
+    if not link:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Link not found")
+
+    if link["expires_at"] and link["expires_at"] < time.strftime("%Y-%m-%d"):
+        conn.close()
+        raise HTTPException(status_code=410, detail="Link expired")
+
+    student_id = link["student_id"]
+    info = _student_financials(conn, student_id)
+    if not info:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    attendance = conn.execute(
+        "SELECT date, attendance_status, remarks FROM attendance WHERE student_id = ? ORDER BY date DESC LIMIT 10",
+        (student_id,),
+    ).fetchall()
+    conn.close()
+
+    return {
+        "student": info["student"],
+        "fees": {
+            "total": info["total"],
+            "paid": info["paid"],
+            "due": info["due"],
+            "due_date": info["due_date"]
+        },
+        "attendance": [dict(r) for r in attendance]
+    }
 
 
 @app.get("/admissions/{admission_id}/pdf")
@@ -1272,6 +1583,42 @@ def attendance_by_date(date: str, request: Request):
         ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+@app.get("/attendance/month")
+def attendance_month(month: str, request: Request):
+    user = _get_current_user(request)
+    if not re.match(r"^\d{4}-\d{2}$", month):
+        raise HTTPException(status_code=400, detail="Invalid month")
+    year, mon = map(int, month.split("-"))
+    start = f"{year}-{mon:02d}-01"
+    if mon == 12:
+        end = f"{year+1}-01-01"
+    else:
+        end = f"{year}-{mon+1:02d}-01"
+
+    conn = get_connection()
+    if user and not _is_superuser(user):
+        rows = conn.execute(
+            "SELECT date, attendance_status AS status FROM attendance WHERE student_id = ? AND date >= ? AND date < ?",
+            (user["user"], start, end),
+        ).fetchall()
+        mode = "student"
+    else:
+        rows = conn.execute(
+            """
+            SELECT date,
+                   SUM(CASE WHEN attendance_status = 'Present' THEN 1 ELSE 0 END) AS present,
+                   SUM(CASE WHEN attendance_status = 'Absent' THEN 1 ELSE 0 END) AS absent
+            FROM attendance
+            WHERE date >= ? AND date < ?
+            GROUP BY date
+            """,
+            (start, end),
+        ).fetchall()
+        mode = "staff"
+    conn.close()
+    return {"mode": mode, "month": month, "days": [dict(r) for r in rows]}
+
 
 @app.post("/attendance/record")
 def record_attendance(payload: AttendanceSubmission, request: Request):
@@ -1821,7 +2168,7 @@ def recent_fees(request: Request):
     if user and not _is_superuser(user):
         rows = conn.execute(
             """
-            SELECT fee_id, student_id, amount_total, amount_paid, due_date, remarks, created_at
+            SELECT fee_id, student_id, amount_total, amount_paid, due_date, remarks
             FROM fees
             WHERE student_id = ?
             ORDER BY fee_id DESC
@@ -1832,7 +2179,7 @@ def recent_fees(request: Request):
     else:
         rows = conn.execute(
             """
-            SELECT fee_id, student_id, amount_total, amount_paid, due_date, remarks, created_at
+            SELECT fee_id, student_id, amount_total, amount_paid, due_date, remarks
             FROM fees
             ORDER BY fee_id DESC
             LIMIT 20
@@ -1904,6 +2251,38 @@ def fees_admin_policy(payload: FeePolicyUpdateRequest, request: Request):
         "total": info_after["total"],
         "due": info_after["due"],
     }
+
+
+@app.post("/fees/reminders")
+def send_fee_reminders(payload: FeeRemindersRequest, request: Request):
+    user = _get_current_user(request)
+    _require_superuser(user)
+    conn = get_connection()
+    students = conn.execute("SELECT student_id FROM students").fetchall()
+
+    from datetime import datetime, timedelta
+    today = datetime.now()
+    max_date = today + timedelta(days=payload.days)
+    today_str = today.strftime("%Y-%m-%d")
+    max_date_str = max_date.strftime("%Y-%m-%d")
+
+    sent = 0
+    for s in students:
+        info = _student_financials(conn, s["student_id"])
+        if not info or info["due"] <= 0 or not info["due_date"]:
+            continue
+        if today_str <= info["due_date"] <= max_date_str:
+            title = "Fee Reminder"
+            message = f"Your fee balance is INR {info['due']}. Due date: {info['due_date']}."
+            conn.execute(
+                "INSERT INTO notifications (title, message, level, target_user) VALUES (?, ?, ?, ?)",
+                (title, message, "info", s["student_id"]),
+            )
+            sent += 1
+    conn.commit()
+    conn.close()
+    _log_activity(user, "fee_reminders_sent", f"Sent {sent} fee reminders", {"days": payload.days, "sent": sent})
+    return {"status": "ok", "sent": sent}
 
 
 @app.post("/fees/admin/reset-unpaid")
@@ -2388,6 +2767,291 @@ def create_notification(payload: NotificationRequest, request: Request):
         {"notification_id": notification_id, "title": payload.title, "target_user": payload.target_user},
     )
     return {"status": "ok", "message": "Notification created"}
+
+
+@app.get("/tests")
+def list_tests(request: Request):
+    user = _get_current_user(request)
+    _ensure_tests_tables()
+    conn = get_connection()
+    if _is_superuser(user):
+        rows = conn.execute(
+            """
+            SELECT
+                t.test_id,
+                t.title,
+                t.duration_minutes,
+                t.created_at,
+                (SELECT COUNT(*) FROM test_questions q WHERE q.test_id = t.test_id) AS question_count,
+                (SELECT COUNT(*) FROM test_assignments a WHERE a.test_id = t.test_id) AS assignment_count,
+                (SELECT COUNT(*) FROM test_attempts x WHERE x.test_id = t.test_id) AS attempt_count,
+                (SELECT COUNT(*) FROM test_attempts x WHERE x.test_id = t.test_id AND x.malpractice_flag = 1) AS malpractice_count
+            FROM tests t
+            WHERE t.is_active = 1
+            ORDER BY t.test_id DESC
+            """
+        ).fetchall()
+    else:
+        uid = user["user"]
+        rows = conn.execute(
+            """
+            SELECT
+                t.test_id,
+                t.title,
+                t.duration_minutes,
+                (
+                    SELECT status FROM test_attempts x
+                    WHERE x.test_id = t.test_id AND x.student_id = ?
+                    ORDER BY x.attempt_id DESC LIMIT 1
+                ) AS attempt_status
+            FROM tests t
+            WHERE t.is_active = 1
+                AND (
+                    NOT EXISTS (SELECT 1 FROM test_assignments a WHERE a.test_id = t.test_id)
+                    OR EXISTS (SELECT 1 FROM test_assignments a WHERE a.test_id = t.test_id AND a.student_id = ?)
+                )
+            ORDER BY t.test_id DESC
+            """,
+            (uid, uid),
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.get("/tests/{test_id}")
+def test_detail(test_id: int, request: Request):
+    user = _get_current_user(request)
+    _ensure_tests_tables()
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT test_id, title, description, duration_minutes FROM tests WHERE test_id = ? AND is_active = 1",
+        (test_id,),
+    ).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Test not found")
+
+    if not _is_superuser(user):
+        uid = user["user"]
+        assigned = conn.execute(
+            """
+            SELECT 1 AS ok WHERE
+            NOT EXISTS (SELECT 1 FROM test_assignments a WHERE a.test_id = ?)
+            OR EXISTS (SELECT 1 FROM test_assignments a WHERE a.test_id = ? AND a.student_id = ?)
+            """,
+            (test_id, test_id, uid),
+        ).fetchone()
+        if not assigned:
+            conn.close()
+            raise HTTPException(status_code=403, detail="Forbidden")
+
+    q_rows = conn.execute(
+        "SELECT question_id, question_order, question_text, option_a, option_b, option_c, option_d, correct_answer FROM test_questions WHERE test_id = ? ORDER BY question_order ASC",
+        (test_id,),
+    ).fetchall()
+    conn.close()
+
+    questions = []
+    for q in q_rows:
+        item = dict(q)
+        if not _is_superuser(user):
+            item.pop("correct_answer", None)
+        questions.append(item)
+
+    res = dict(row)
+    res["questions"] = questions
+    return res
+
+
+@app.get("/tests/{test_id}/attempts")
+def test_attempts_by_test(test_id: int, request: Request):
+    user = _get_current_user(request)
+    _require_superuser(user)
+    _ensure_tests_tables()
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT
+            attempt_id, test_id, student_id, start_time, submitted_at, status, score, total_points, malpractice_count, malpractice_flag
+        FROM test_attempts
+        WHERE test_id = ?
+        ORDER BY attempt_id DESC
+        """,
+        (test_id,),
+    ).fetchall()
+
+    out = []
+    for r in rows:
+        item = dict(r)
+        events = conn.execute(
+            "SELECT event_id, event_type, details, created_at FROM test_malpractice_events WHERE attempt_id = ? ORDER BY event_id ASC",
+            (r["attempt_id"],),
+        ).fetchall()
+        item["malpractice_events"] = [dict(e) for e in events]
+        out.append(item)
+    conn.close()
+    return out
+
+
+@app.post("/tests/{test_id}/start")
+def test_start(test_id: int, request: Request):
+    user = _get_current_user(request)
+    if _is_superuser(user):
+        raise HTTPException(status_code=403, detail="Staff cannot take tests")
+    _ensure_tests_tables()
+    conn = get_connection()
+    test = conn.execute("SELECT test_id, title, duration_minutes FROM tests WHERE test_id = ? AND is_active = 1", (test_id,)).fetchone()
+    if not test:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Test not found")
+
+    uid = user["user"]
+    assigned = conn.execute(
+        """
+        SELECT 1 AS ok WHERE
+        NOT EXISTS (SELECT 1 FROM test_assignments a WHERE a.test_id = ?)
+        OR EXISTS (SELECT 1 FROM test_assignments a WHERE a.test_id = ? AND a.student_id = ?)
+        """,
+        (test_id, test_id, uid),
+    ).fetchone()
+    if not assigned:
+        conn.close()
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    attempt = conn.execute(
+        "SELECT * FROM test_attempts WHERE test_id = ? AND student_id = ? AND status = 'in_progress' ORDER BY attempt_id DESC LIMIT 1",
+        (test_id, uid),
+    ).fetchone()
+
+    if not attempt:
+        cur = conn.execute("INSERT INTO test_attempts (test_id, student_id, status) VALUES (?, ?, 'in_progress')", (test_id, uid))
+        attempt_id = cur.lastrowid
+        attempt = conn.execute("SELECT * FROM test_attempts WHERE attempt_id = ?", (attempt_id,)).fetchone()
+        _log_activity(user, "test_started", f"Test attempt started (test #{test_id})", {"test_id": test_id, "attempt_id": attempt_id})
+
+    q_rows = conn.execute("SELECT question_id, question_order, question_text, option_a, option_b, option_c, option_d FROM test_questions WHERE test_id = ? ORDER BY question_order ASC", (test_id,)).fetchall()
+
+    # Simple order for now, modular logic handles shuffle if needed
+    questions = [dict(q) for q in q_rows]
+
+    ans_rows = conn.execute("SELECT question_id, answer_text FROM test_attempt_answers WHERE attempt_id = ?", (attempt["attempt_id"],)).fetchall()
+    answers = {r["question_id"]: r["answer_text"] for r in ans_rows}
+
+    from datetime import datetime
+    start_dt = datetime.fromisoformat(attempt["start_time"].replace(" ", "T"))
+    import time
+    start_epoch = int(start_dt.timestamp())
+    ends_at_epoch = start_epoch + int(test["duration_minutes"]) * 60
+
+    conn.close()
+    return {
+        "attempt_id": attempt["attempt_id"],
+        "test_id": test_id,
+        "title": test["title"],
+        "status": attempt["status"],
+        "ends_at_epoch": ends_at_epoch,
+        "answers": answers,
+        "questions": questions
+    }
+
+
+@app.post("/tests/attempts/{attempt_id}/submit")
+def test_submit(attempt_id: int, payload: TestSubmissionRequest, request: Request):
+    user = _get_current_user(request)
+    if _is_superuser(user):
+        raise HTTPException(status_code=403, detail="Staff cannot submit tests")
+    _ensure_tests_tables()
+    conn = get_connection()
+    attempt = conn.execute("SELECT * FROM test_attempts WHERE attempt_id = ?", (attempt_id,)).fetchone()
+    if not attempt:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Attempt not found")
+    if attempt["student_id"] != user["user"]:
+        conn.close()
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if attempt["status"] == "submitted":
+        conn.close()
+        raise HTTPException(status_code=400, detail="Already submitted")
+
+    conn.execute("DELETE FROM test_attempt_answers WHERE attempt_id = ?", (attempt_id,))
+    q_rows = conn.execute("SELECT question_id, correct_answer, points FROM test_questions WHERE test_id = ?", (attempt["test_id"],)).fetchall()
+    by_id = {r["question_id"]: r for r in q_rows}
+
+    score = 0
+    total = sum(r["points"] for r in q_rows)
+    for item in payload.answers:
+        qid = item.get("question_id")
+        if qid not in by_id: continue
+        given = str(item.get("answer", "")).strip().upper()
+        correct = str(by_id[qid]["correct_answer"]).strip().upper()
+        ok = (given == correct)
+        points = by_id[qid]["points"] if ok else 0
+        score += points
+        conn.execute("INSERT INTO test_attempt_answers (attempt_id, question_id, answer_text, is_correct, points_awarded) VALUES (?, ?, ?, ?, ?)",
+                     (attempt_id, qid, given, 1 if ok else 0, points))
+
+    conn.execute("UPDATE test_attempts SET status = 'submitted', submitted_at = datetime('now'), score = ?, total_points = ? WHERE attempt_id = ?",
+                 (score, total, attempt_id))
+    conn.commit()
+    conn.close()
+    _log_activity(user, "test_submitted", f"Test attempt submitted (attempt #{attempt_id})", {"attempt_id": attempt_id, "score": score, "total": total})
+    return {"status": "ok", "score": score, "total_points": total}
+
+
+@app.post("/tests/attempts/{attempt_id}/malpractice")
+def test_malpractice(attempt_id: int, payload: MalpracticeRequest, request: Request):
+    user = _get_current_user(request)
+    _ensure_tests_tables()
+    conn = get_connection()
+    attempt = conn.execute("SELECT * FROM test_attempts WHERE attempt_id = ?", (attempt_id,)).fetchone()
+    if not attempt:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Attempt not found")
+    if attempt["student_id"] != user["user"]:
+        conn.close()
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    conn.execute("INSERT INTO test_malpractice_events (attempt_id, event_type, details) VALUES (?, ?, ?)",
+                 (attempt_id, payload.event_type, payload.details))
+    new_count = attempt["malpractice_count"] + 1
+    conn.execute("UPDATE test_attempts SET malpractice_count = ?, malpractice_flag = 1 WHERE attempt_id = ?", (new_count, attempt_id))
+    conn.commit()
+    conn.close()
+    return {"status": "ok", "malpractice_count": new_count}
+
+
+@app.post("/tests")
+def create_test(payload: TestCreateRequest, request: Request):
+    user = _get_current_user(request)
+    _require_superuser(user)
+    _ensure_tests_tables()
+    conn = get_connection()
+    cur = conn.execute(
+        "INSERT INTO tests (title, description, duration_minutes, created_by) VALUES (?, ?, ?, ?)",
+        (payload.title, payload.description, payload.duration_minutes, user["user"]),
+    )
+    test_id = cur.lastrowid
+    for i, q in enumerate(payload.questions):
+        conn.execute(
+            """
+            INSERT INTO test_questions
+            (test_id, question_order, question_text, option_a, option_b, option_c, option_d, correct_answer, points)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (test_id, i + 1, q.question_text, q.option_a, q.option_b, q.option_c, q.option_d, q.correct_answer, 1),
+        )
+    for sid in payload.assigned_students:
+        conn.execute(
+            "INSERT OR IGNORE INTO test_assignments (test_id, student_id) VALUES (?, ?)",
+            (test_id, sid),
+        )
+    conn.commit()
+    conn.close()
+    _log_activity(user, "test_created", f"Created test #{test_id} ({payload.title})", {
+        "test_id": test_id,
+        "title": payload.title,
+    })
+    return {"status": "ok", "test_id": test_id}
 
 
 @app.post("/notifications/{notification_id}/read")
