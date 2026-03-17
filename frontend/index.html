@@ -434,6 +434,30 @@
                 </tbody>
               </table>
             </div>
+
+            <!-- Edit Attendance Modal -->
+            <div id="attendanceEditModal" class="modal hidden">
+              <div class="modal-content">
+                <span class="close-btn" onclick="closeEditAttendanceModal()">&times;</span>
+                <h3>Edit Attendance</h3>
+                <input type="hidden" id="editAttendanceDate" />
+                <div class="form-row">
+                  <label for="editAttendanceStatus">Status</label>
+                  <select id="editAttendanceStatus">
+                    <option value="Present">Present</option>
+                    <option value="Absent">Absent</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label for="editAttendanceRemarks">Remarks</label>
+                  <input type="text" id="editAttendanceRemarks" placeholder="Remarks" />
+                </div>
+                <div class="form-row" style="margin-top: 15px;">
+                  <button class="btn primary w-full" onclick="submitEditAttendance()">Save Changes</button>
+                </div>
+              </div>
+            </div>
+
           </div>
         </section>
 

@@ -114,6 +114,7 @@ export async function onRequest(context) {
     if (path === "attendance/month" && method === "GET") return attendanceMonth(url, session, env);
     if (path === "attendance/by-date" && method === "GET") return attendanceByDate(url, session, env);
     if (path === "attendance/record" && method === "POST") return attendanceRecord(request, session, env);
+    if (path === "attendance/update" && method === "POST") return attendanceUpdate(request, session, env);
     if (path === "attendance/sync" && method === "POST") return json({ detail: "Use /attendance/sync/upload with a CSV file." }, 400);
     if (path === "attendance/sync/upload" && method === "POST") return attendanceSyncUpload(request, session, env);
 
@@ -2157,7 +2158,7 @@ async function attendanceRecord(request, session, env) {
   const todayIso = new Date().toISOString().slice(0, 10);
   if (date > todayIso) throw httpError(400, "Future attendance dates are not allowed");
   const stmt = env.DB.prepare(
-    "INSERT OR IGNORE INTO attendance (student_id, student_name, course, batch, date, attendance_status, remarks) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    "INSERT OR REPLACE INTO attendance (student_id, student_name, course, batch, date, attendance_status, remarks) VALUES (?, ?, ?, ?, ?, ?, ?)"
   );
   const insertedStudentIds = [];
   for (const r of records) {
@@ -2183,6 +2184,43 @@ async function attendanceRecord(request, session, env) {
     { date, student_ids: insertedStudentIds }
   );
   return json({ status: "ok", message: "Attendance recorded", count: records.length });
+}
+
+async function attendanceUpdate(request, session, env) {
+  if (!isSuperuser(session) && session.role !== "staff") throw httpError(403, "Forbidden");
+  const body = await request.json();
+  const studentId = String(body.student_id || "").trim();
+  const date = String(body.date || "").trim();
+  const status = String(body.attendance_status || "").trim();
+  const remarks = String(body.remarks || "").trim();
+
+  if (!studentId || !date || !status) {
+    throw httpError(400, "student_id, date, and attendance_status are required");
+  }
+
+  const normalizedStatus = normalizeAttendanceStatus(status);
+
+  // Check if record exists
+  const existing = await env.DB.prepare("SELECT student_name FROM attendance WHERE student_id = ? AND date = ?")
+    .bind(studentId, date).first();
+
+  if (!existing) {
+    throw httpError(404, "Attendance record not found for this date");
+  }
+
+  const result = await env.DB.prepare(
+    "UPDATE attendance SET attendance_status = ?, remarks = ? WHERE student_id = ? AND date = ?"
+  ).bind(normalizedStatus, remarks, studentId, date).run();
+
+  await writeActivity(
+    env,
+    session,
+    "attendance_updated",
+    `Attendance updated for ${existing.student_name} (${studentId}) on ${date}`,
+    { student_id: studentId, date, status: normalizedStatus }
+  );
+
+  return json({ status: "ok", message: "Attendance updated" });
 }
 
 function parseCsvLine(line) {
