@@ -86,6 +86,10 @@ export async function onRequest(context) {
       const studentId = path.split("/")[1];
       return studentBalance(studentId, session, env);
     }
+    if (path.startsWith("students/") && path.endsWith("/password") && method === "GET") {
+      const studentId = path.split("/")[1];
+      return studentPassword(studentId, session, env);
+    }
     if (path.startsWith("students/") && path.endsWith("/attendance") && method === "GET") {
       const studentId = path.split("/")[1];
       return studentAttendance(studentId, session, env);
@@ -230,7 +234,31 @@ function random8Digits() {
   return s;
 }
 
+async function ensureStudentPasswordsTable(env) {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS student_passwords (
+      student_id TEXT PRIMARY KEY,
+      password_plain TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`
+  ).run();
+}
+
+async function ensureStudentPassword(env, studentId) {
+  await ensureStudentPasswordsTable(env);
+  const row = await env.DB.prepare("SELECT password_plain FROM student_passwords WHERE student_id = ?")
+    .bind(studentId).first();
+  if (row?.password_plain) return String(row.password_plain);
+  const pwd = random8Digits();
+  await env.DB.prepare(
+    "INSERT INTO student_passwords (student_id, password_plain) VALUES (?, ?)"
+  ).bind(studentId, pwd).run();
+  return pwd;
+}
+
 async function ensureCredentials(env) {
+  await ensureStudentPasswordsTable(env);
   await env.DB.prepare(
     "INSERT OR IGNORE INTO credentials (username, password, role) VALUES ('superuser', ?, 'superuser')"
   ).bind(await hashPassword("qwerty")).run();
@@ -243,9 +271,10 @@ async function ensureCredentials(env) {
   const students = await env.DB.prepare("SELECT student_id FROM students").all();
   for (const row of students.results || []) {
     if (/\d/.test(String(row.student_id))) {
+      const pwd = await ensureStudentPassword(env, String(row.student_id));
       await env.DB.prepare(
-        "INSERT OR IGNORE INTO credentials (username, password, role) VALUES (?, ?, 'student')"
-      ).bind(row.student_id, await hashPassword(random8Digits())).run();
+        "INSERT INTO credentials (username, password, role) VALUES (?, ?, 'student') ON CONFLICT(username) DO UPDATE SET password = excluded.password, role = 'student'"
+      ).bind(row.student_id, await hashPassword(pwd)).run();
     }
   }
 }
@@ -1832,6 +1861,7 @@ async function studentsDelete(request, session, env) {
   const body = await request.json();
   const studentIds = normalizeStudentIds(body.student_ids);
   if (!studentIds.length) throw httpError(400, "Invalid payload");
+  await ensureStudentPasswordsTable(env);
   const deletedSnapshots = [];
   for (const sid of studentIds) {
     const student = await env.DB.prepare(
@@ -1853,6 +1883,7 @@ async function studentsDelete(request, session, env) {
     await env.DB.prepare("DELETE FROM fees WHERE student_id = ?").bind(sid).run();
     await env.DB.prepare("DELETE FROM students WHERE student_id = ?").bind(sid).run();
     await env.DB.prepare("DELETE FROM credentials WHERE username = ?").bind(sid).run();
+    await env.DB.prepare("DELETE FROM student_passwords WHERE student_id = ?").bind(sid).run();
   }
   await writeActivity(
     env,
@@ -1879,6 +1910,18 @@ async function studentBalance(studentId, session, env) {
     due_date: info.due_date,
     gst_percent: 18,
   });
+}
+
+async function studentPassword(studentId, session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  const student = await env.DB.prepare("SELECT student_id FROM students WHERE student_id = ?")
+    .bind(studentId).first();
+  if (!student) throw httpError(404, "Student not found");
+  const pwd = await ensureStudentPassword(env, String(studentId));
+  await env.DB.prepare(
+    "INSERT INTO credentials (username, password, role) VALUES (?, ?, 'student') ON CONFLICT(username) DO UPDATE SET password = excluded.password, role = 'student'"
+  ).bind(studentId, await hashPassword(pwd)).run();
+  return json({ student_id: studentId, password: pwd });
 }
 
 async function studentAttendance(studentId, session, env) {

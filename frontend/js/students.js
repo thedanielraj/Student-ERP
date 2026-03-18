@@ -214,13 +214,16 @@ export async function selectStudent(student) {
 
   const detailName = document.getElementById("detailName");
   const detailMeta = document.getElementById("detailMeta");
+  const passwordInput = document.getElementById("studentPasswordInput");
   if (detailName) detailName.textContent = student.student_name;
   if (detailMeta) detailMeta.textContent = `ID: ${student.student_id} | ${student.course} | ${student.batch}`;
+  if (passwordInput) passwordInput.value = "Loading...";
 
   const tasks = [];
   if (window.loadBalance) tasks.push(window.loadBalance(student.student_id));
   if (window.loadAttendance) tasks.push(window.loadAttendance(student.student_id));
   if (window.loadFees) tasks.push(window.loadFees(student.student_id));
+  tasks.push(loadStudentPassword(student.student_id));
   await Promise.all(tasks);
 }
 
@@ -234,6 +237,35 @@ export async function loadBalance(studentId) {
   if (total) total.textContent = formatMoney(data.total);
   if (paid) paid.textContent = formatMoney(data.paid);
   if (balance) balance.textContent = formatMoney(data.balance);
+}
+
+export async function loadStudentPassword(studentId) {
+  const passwordInput = document.getElementById("studentPasswordInput");
+  if (!passwordInput) return;
+  if (!state.authInfo || state.authInfo.role === "student") {
+    passwordInput.value = "";
+    passwordInput.placeholder = "Student password (staff only)";
+    return;
+  }
+  const res = await authFetch(`${API}/students/${encodeURIComponent(studentId)}/password`);
+  if (!res.ok) {
+    passwordInput.value = "-";
+    return;
+  }
+  const data = await res.json().catch(() => ({}));
+  passwordInput.value = String(data.password || "-");
+}
+
+export function copyStudentPassword() {
+  const passwordInput = document.getElementById("studentPasswordInput");
+  if (!passwordInput || !passwordInput.value) {
+    alert("No password to copy.");
+    return;
+  }
+  navigator.clipboard?.writeText(passwordInput.value).then(
+    () => alert("Password copied."),
+    () => alert("Unable to copy password."),
+  );
 }
 
 export function updateSideCounts() {

@@ -1362,6 +1362,22 @@ def student_attendance(student_id: str, request: Request):
     conn.close()
     return [dict(r) for r in rows]
 
+@app.get("/students/{student_id}/password")
+def student_password(student_id: str, request: Request):
+    user = _get_current_user(request)
+    _require_superuser(user)
+    _ensure_passwords_for_students()
+    conn = get_connection()
+    exists = conn.execute("SELECT 1 FROM students WHERE student_id = ?", (student_id,)).fetchone()
+    conn.close()
+    if not exists:
+        raise HTTPException(status_code=404, detail="Student not found")
+    passwords = _load_passwords()
+    if student_id not in passwords:
+        passwords[student_id] = _generate_password()
+        _save_passwords(passwords)
+    return {"student_id": student_id, "password": passwords[student_id]}
+
 @app.get("/students/{student_id}/fees")
 def student_fees(student_id: str, request: Request):
     user = _get_current_user(request)
