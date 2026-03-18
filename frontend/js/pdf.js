@@ -450,7 +450,7 @@ export async function downloadInvoicePdf(invoice) {
 
     drawCenteredText(page, "ARUNAND'S AVIATION INSTITUTE", headerTop, 16, fontBold, accent, contentLeft, contentWidth);
     drawCenteredText(page, "Bangalore, India", headerTop - 18, 9, font, muted, contentLeft, contentWidth);
-    drawCenteredText(page, "Contact No.: -   Website: arunandsaviation.com", headerTop - 32, 9, font, muted, contentLeft, contentWidth);
+    drawCenteredText(page, "Contact No.: +91 903 696 0521   Website: arunandsaviation.com", headerTop - 32, 9, font, muted, contentLeft, contentWidth);
 
     const titleText = `Fee Receipt (${getAcademicYearLabel(invoice.date)}) - ${copyLabel}`;
     const titleY = headerTop - 64;
@@ -528,8 +528,13 @@ export async function downloadInvoicePdf(invoice) {
     page.drawLine({ start: { x: modeX + modeCols[0] + modeCols[1], y: modeY }, end: { x: modeX + modeCols[0] + modeCols[1], y: modeY + 22 }, thickness: 0.8, color: border });
     page.drawLine({ start: { x: modeX + modeCols[0] + modeCols[1] + modeCols[2], y: modeY }, end: { x: modeX + modeCols[0] + modeCols[1] + modeCols[2], y: modeY + 22 }, thickness: 0.8, color: border });
     const isOnline = Boolean(invoice.payment_id || invoice.order_id);
+    const paymentMode = String(invoice.payment_mode || (isOnline ? "ONLINE" : "OFFLINE")).toUpperCase();
+    const bankNameValue = invoice.bank_name || (paymentMode === "CASH" ? "Cash" : (isOnline ? "Razorpay" : "NA"));
+    const txnUtrValue = invoice.txn_utr_no || invoice.payment_id || "NA";
+    const bankRefValue = invoice.bank_ref_no || invoice.order_id || "NA";
+    const txnTypeValue = invoice.transaction_type || (paymentMode || (isOnline ? "ONLINE" : "OFFLINE"));
     drawAlignedText(page, "Payment Mode:", modeX + 6, modeY + 7, modeCols[0] - 12, "left", 9, fontBold, text);
-    drawAlignedText(page, isOnline ? "ONLINE" : "OFFLINE", modeX + modeCols[0], modeY + 7, modeCols[1], "center", 9, fontBold, text);
+    drawAlignedText(page, paymentMode, modeX + modeCols[0], modeY + 7, modeCols[1], "center", 9, fontBold, text);
     drawAlignedText(page, "Discount:", modeX + modeCols[0] + modeCols[1] + 6, modeY + 7, modeCols[2] - 12, "left", 9, fontBold, text);
     drawAlignedText(page, formatMoney(concessionAmount), modeX + modeCols[0] + modeCols[1] + modeCols[2], modeY + 7, modeCols[3], "center", 9, fontBold, text);
 
@@ -539,18 +544,15 @@ export async function downloadInvoicePdf(invoice) {
     page.drawLine({ start: { x: contentLeft, y: detailsTop + 44 }, end: { x: contentRight, y: detailsTop + 44 }, thickness: 0.8, color: border });
     page.drawLine({ start: { x: contentLeft, y: detailsTop + 22 }, end: { x: contentRight, y: detailsTop + 22 }, thickness: 0.8, color: border });
 
-    const bankName = isOnline ? "Razorpay" : "Cash";
-    const paymentId = invoice.payment_id || "NA";
-    const orderId = invoice.order_id || "NA";
     drawAlignedText(page, "Bank Name:", contentLeft + 6, detailsTop + 30, 114, "left", 9, fontBold, text);
-    drawAlignedText(page, bankName, contentLeft + 120, detailsTop + 30, 150, "center", 9, font, text);
+    drawAlignedText(page, bankNameValue || "NA", contentLeft + 120, detailsTop + 30, 150, "center", 9, font, text);
     drawAlignedText(page, "Txn / UTR No:", contentLeft + 276, detailsTop + 30, 104, "left", 9, fontBold, text);
-    drawAlignedText(page, paymentId, contentLeft + 380, detailsTop + 30, 131, "center", 9, font, text);
+    drawAlignedText(page, txnUtrValue || "NA", contentLeft + 380, detailsTop + 30, 131, "center", 9, font, text);
 
     drawAlignedText(page, "Bank Ref No:", contentLeft + 6, detailsTop + 8, 114, "left", 9, fontBold, text);
-    drawAlignedText(page, orderId, contentLeft + 120, detailsTop + 8, 150, "center", 9, font, text);
+    drawAlignedText(page, bankRefValue || "NA", contentLeft + 120, detailsTop + 8, 150, "center", 9, font, text);
     drawAlignedText(page, "Transaction Type:", contentLeft + 276, detailsTop + 8, 104, "left", 9, fontBold, text);
-    drawAlignedText(page, isOnline ? "ONLINE" : "OFFLINE", contentLeft + 380, detailsTop + 8, 131, "center", 9, font, text);
+    drawAlignedText(page, txnTypeValue || "NA", contentLeft + 380, detailsTop + 8, 131, "center", 9, font, text);
 
     const wordsY = detailsTop - 26;
     page.drawRectangle({ x: contentLeft, y: wordsY, width: contentWidth, height: 22, borderColor: border, borderWidth: 1 });

@@ -327,6 +327,21 @@ def _ensure_fee_policies_table():
     conn.close()
 
 
+def _ensure_fee_receipt_columns(conn):
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(fees)").fetchall()}
+    additions = [
+        ("payment_mode", "TEXT"),
+        ("bank_name", "TEXT"),
+        ("txn_utr_no", "TEXT"),
+        ("bank_ref_no", "TEXT"),
+        ("transaction_type", "TEXT"),
+    ]
+    for name, col_type in additions:
+        if name not in cols:
+            conn.execute(f"ALTER TABLE fees ADD COLUMN {name} {col_type}")
+    conn.commit()
+
+
 def _parse_razorpay_refs(remarks: str):
     text = str(remarks or "")
     payment_match = re.search(r"payment_id=([A-Za-z0-9_]+)", text, flags=re.IGNORECASE)
@@ -2119,18 +2134,39 @@ async def record_fee(
     amount_total: float = Form(None),
     due_date: str = Form(None),
     remarks: str = Form(""),
+    payment_mode: str = Form(""),
+    bank_name: str = Form(""),
+    txn_utr_no: str = Form(""),
+    bank_ref_no: str = Form(""),
+    transaction_type: str = Form(""),
     receipt: UploadFile = File(None),
     request: Request = None,
 ):
     user = _get_current_user(request)
     _require_superuser(user)
     conn = get_connection()
+    _ensure_fee_receipt_columns(conn)
     info = _student_financials(conn, student_id)
     if not info:
         conn.close()
         raise HTTPException(status_code=404, detail="Student not found")
     if amount_total is None:
         amount_total = float(info["total"])
+    mode = (payment_mode or "").strip().upper()
+    if not mode:
+        mode = "OFFLINE"
+    bank_name = (bank_name or "").strip()
+    txn_utr_no = (txn_utr_no or "").strip()
+    bank_ref_no = (bank_ref_no or "").strip()
+    txn_type = (transaction_type or "").strip().upper()
+    if not txn_type:
+        txn_type = mode
+    if not bank_name:
+        bank_name = "Cash" if mode == "CASH" else ("Razorpay" if mode == "ONLINE" else "NA")
+    if not txn_utr_no:
+        txn_utr_no = "NA"
+    if not bank_ref_no:
+        bank_ref_no = "NA"
 
     receipt_path = None
     if receipt is not None:
@@ -2145,10 +2181,34 @@ async def record_fee(
     conn = get_connection()
     cur = conn.execute(
         """
-        INSERT INTO fees (student_id, amount_total, amount_paid, due_date, remarks, receipt_path)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO fees (
+            student_id,
+            amount_total,
+            amount_paid,
+            due_date,
+            remarks,
+            receipt_path,
+            payment_mode,
+            bank_name,
+            txn_utr_no,
+            bank_ref_no,
+            transaction_type
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (student_id, amount_total, amount_paid, due_date, remarks, receipt_path),
+        (
+            student_id,
+            amount_total,
+            amount_paid,
+            due_date,
+            remarks,
+            receipt_path,
+            mode,
+            bank_name,
+            txn_utr_no,
+            bank_ref_no,
+            txn_type,
+        ),
     )
     fee_id = cur.lastrowid
     conn.commit()
@@ -2330,6 +2390,7 @@ def fees_admin_reset_unpaid(request: Request):
 def fee_invoice(fee_id: int, request: Request):
     user = _get_current_user(request)
     conn = get_connection()
+    _ensure_fee_receipt_columns(conn)
     row = conn.execute(
         """
         SELECT
@@ -2338,6 +2399,11 @@ def fee_invoice(fee_id: int, request: Request):
           f.amount_total,
           f.amount_paid,
           f.remarks,
+          f.payment_mode,
+          f.bank_name,
+          f.txn_utr_no,
+          f.bank_ref_no,
+          f.transaction_type,
           f.created_at,
           s.student_name,
           s.course
@@ -2366,9 +2432,15 @@ def fee_invoice(fee_id: int, request: Request):
             "course": row["course"] or "",
             "payment_id": refs["payment_id"],
             "order_id": refs["order_id"],
+            "payment_mode": row["payment_mode"] or "",
+            "bank_name": row["bank_name"] or "",
+            "txn_utr_no": row["txn_utr_no"] or "",
+            "bank_ref_no": row["bank_ref_no"] or "",
+            "transaction_type": row["transaction_type"] or "",
             "amount_paid": float(row["amount_paid"] or 0),
             "amount_total": float(row["amount_total"] or 0),
             "balance_due": float(info["due"]) if info else default_due,
+            "concession_amount": float(info["concession_amount"]) if info else 0.0,
         }
     }
 
@@ -2486,6 +2558,7 @@ def verify_razorpay_payment(payload: RazorpayVerifyRequest, request: Request):
         raise HTTPException(status_code=400, detail="Invalid payment signature")
 
     conn = get_connection()
+    _ensure_fee_receipt_columns(conn)
     info = _student_financials(conn, payload.student_id)
     if not info:
         conn.close()
@@ -2499,10 +2572,30 @@ def verify_razorpay_payment(payload: RazorpayVerifyRequest, request: Request):
     )
     cur = conn.execute(
         """
-        INSERT INTO fees (student_id, amount_total, amount_paid, remarks)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO fees (
+            student_id,
+            amount_total,
+            amount_paid,
+            remarks,
+            payment_mode,
+            bank_name,
+            txn_utr_no,
+            bank_ref_no,
+            transaction_type
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (payload.student_id, float(info["total"]), amount_paid, remarks),
+        (
+            payload.student_id,
+            float(info["total"]),
+            amount_paid,
+            remarks,
+            "ONLINE",
+            "Razorpay",
+            payload.razorpay_payment_id,
+            payload.razorpay_order_id,
+            "ONLINE",
+        ),
     )
     fee_id = cur.lastrowid
     balance_due = max(float(info["due"]) - amount_paid, 0.0)
@@ -2520,9 +2613,15 @@ def verify_razorpay_payment(payload: RazorpayVerifyRequest, request: Request):
             "course": info["student"]["course"] or "",
             "payment_id": payload.razorpay_payment_id,
             "order_id": payload.razorpay_order_id,
+            "payment_mode": "ONLINE",
+            "bank_name": "Razorpay",
+            "txn_utr_no": payload.razorpay_payment_id,
+            "bank_ref_no": payload.razorpay_order_id,
+            "transaction_type": "ONLINE",
             "amount_paid": amount_paid,
             "amount_total": float(info["total"]),
             "balance_due": balance_due,
+            "concession_amount": float(info["concession_amount"]),
         },
     }
 

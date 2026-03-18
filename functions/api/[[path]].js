@@ -1266,6 +1266,23 @@ async function ensureFeePoliciesTable(env) {
   ).run();
 }
 
+async function ensureFeeReceiptColumns(env) {
+  const info = await env.DB.prepare("PRAGMA table_info(fees)").all();
+  const existing = new Set((info.results || []).map((r) => r.name));
+  const additions = [
+    ["payment_mode", "TEXT"],
+    ["bank_name", "TEXT"],
+    ["txn_utr_no", "TEXT"],
+    ["bank_ref_no", "TEXT"],
+    ["transaction_type", "TEXT"],
+  ];
+  for (const [name, type] of additions) {
+    if (!existing.has(name)) {
+      await env.DB.prepare(`ALTER TABLE fees ADD COLUMN ${name} ${type}`).run();
+    }
+  }
+}
+
 async function ensureTestsTables(env) {
   await env.DB.prepare(
     `CREATE TABLE IF NOT EXISTS tests (
@@ -2019,6 +2036,7 @@ function toIsoDate(value) {
 }
 
 async function feeInvoice(feeId, session, env) {
+  await ensureFeeReceiptColumns(env);
   const row = await env.DB.prepare(
     `SELECT
       f.fee_id,
@@ -2026,6 +2044,11 @@ async function feeInvoice(feeId, session, env) {
       f.amount_total,
       f.amount_paid,
       f.remarks,
+      f.payment_mode,
+      f.bank_name,
+      f.txn_utr_no,
+      f.bank_ref_no,
+      f.transaction_type,
       f.created_at,
       s.student_name,
       s.course
@@ -2047,9 +2070,15 @@ async function feeInvoice(feeId, session, env) {
       course: row.course || "",
       payment_id: refs.payment_id,
       order_id: refs.order_id,
+      payment_mode: row.payment_mode || "",
+      bank_name: row.bank_name || "",
+      txn_utr_no: row.txn_utr_no || "",
+      bank_ref_no: row.bank_ref_no || "",
+      transaction_type: row.transaction_type || "",
       amount_paid: Number(row.amount_paid || 0),
       amount_total: Number(row.amount_total || 0),
       balance_due: financials ? Number(financials.due || 0) : defaultDue,
+      concession_amount: financials ? Number(financials.concession_amount || 0) : 0,
     },
   });
 }
@@ -2401,12 +2430,23 @@ async function feesRecord(request, session, env) {
   const form = await request.formData();
   const studentId = String(form.get("student_id") || "");
   const amountPaid = Number(form.get("amount_paid") || 0);
+  const paymentMode = String(form.get("payment_mode") || "").trim().toUpperCase();
+  let bankName = String(form.get("bank_name") || "").trim();
+  let txnUtrNo = String(form.get("txn_utr_no") || "").trim();
+  let bankRefNo = String(form.get("bank_ref_no") || "").trim();
+  let transactionType = String(form.get("transaction_type") || "").trim().toUpperCase();
   const info = await studentFinancials(env, studentId);
   if (!info) throw httpError(404, "Student not found");
   const amountTotal = Number(form.get("amount_total") || info.total || amountPaid);
   const dueDate = String(form.get("due_date") || "");
   const remarks = String(form.get("remarks") || "");
   if (!studentId || amountPaid <= 0) throw httpError(400, "Invalid fee payload");
+  await ensureFeeReceiptColumns(env);
+  const mode = paymentMode || "OFFLINE";
+  if (!transactionType) transactionType = mode;
+  if (!bankName) bankName = mode === "CASH" ? "Cash" : (mode === "ONLINE" ? "Razorpay" : "NA");
+  if (!txnUtrNo) txnUtrNo = "NA";
+  if (!bankRefNo) bankRefNo = "NA";
   let receiptPath = null;
   const receipt = form.get("receipt");
   if (receipt && typeof receipt === "object" && "arrayBuffer" in receipt && env.ERP_FILES) {
@@ -2418,8 +2458,8 @@ async function feesRecord(request, session, env) {
     receiptPath = key;
   }
   const result = await env.DB.prepare(
-    "INSERT INTO fees (student_id, amount_total, amount_paid, due_date, remarks, receipt_path) VALUES (?, ?, ?, ?, ?, ?)"
-  ).bind(studentId, amountTotal, amountPaid, dueDate || null, remarks, receiptPath).run();
+    "INSERT INTO fees (student_id, amount_total, amount_paid, due_date, remarks, receipt_path, payment_mode, bank_name, txn_utr_no, bank_ref_no, transaction_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ).bind(studentId, amountTotal, amountPaid, dueDate || null, remarks, receiptPath, mode, bankName, txnUtrNo, bankRefNo, transactionType).run();
   const feeId = Number(result.meta?.last_row_id || 0);
   await writeActivity(
     env,
@@ -2987,10 +3027,11 @@ async function razorpayVerify(request, session, env) {
   if (computed !== String(b.razorpay_signature || "")) throw httpError(400, "Invalid payment signature");
   const info = await studentFinancials(env, b.student_id);
   if (!info) throw httpError(404, "Student not found");
+  await ensureFeeReceiptColumns(env);
   const amountPaid = Math.min(Math.max(Number(b.amount_paid_inr || 0), 0), info.due);
   const remarks = `Razorpay payment_id=${b.razorpay_payment_id}, order_id=${b.razorpay_order_id}`;
-  const ins = await env.DB.prepare("INSERT INTO fees (student_id, amount_total, amount_paid, remarks) VALUES (?, ?, ?, ?)")
-    .bind(b.student_id, info.total, amountPaid, remarks).run();
+  const ins = await env.DB.prepare("INSERT INTO fees (student_id, amount_total, amount_paid, remarks, payment_mode, bank_name, txn_utr_no, bank_ref_no, transaction_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .bind(b.student_id, info.total, amountPaid, remarks, "ONLINE", "Razorpay", b.razorpay_payment_id, b.razorpay_order_id, "ONLINE").run();
   const feeId = Number(ins.meta?.last_row_id || 0);
   const nowIso = new Date().toISOString().slice(0, 10);
   const balanceDue = Math.max(info.due - amountPaid, 0);
@@ -3006,9 +3047,15 @@ async function razorpayVerify(request, session, env) {
       course: info.student.course || "",
       payment_id: b.razorpay_payment_id || "",
       order_id: b.razorpay_order_id || "",
+      payment_mode: "ONLINE",
+      bank_name: "Razorpay",
+      txn_utr_no: b.razorpay_payment_id || "",
+      bank_ref_no: b.razorpay_order_id || "",
+      transaction_type: "ONLINE",
       amount_paid: amountPaid,
       amount_total: info.total,
       balance_due: balanceDue,
+      concession_amount: Number(info.concession_amount || 0),
     },
   });
 }

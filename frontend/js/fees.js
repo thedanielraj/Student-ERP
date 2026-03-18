@@ -68,7 +68,7 @@ export function renderFeesEntryList() {
   body.innerHTML = "";
 
   if (!state.allStudents.length) {
-    body.innerHTML = `<tr><td colspan="9" class="empty">No students found</td></tr>`;
+    body.innerHTML = `<tr><td colspan="14" class="empty">No students found</td></tr>`;
     return;
   }
 
@@ -87,6 +87,17 @@ export function renderFeesEntryList() {
       <td><input class="fee-input" id="fee-paid-${s.student_id}" type="number" min="0" step="0.01" placeholder="Paid" /></td>
       <td><input id="fee-receipt-${s.student_id}" type="file" /></td>
       <td><input class="fee-input" id="fee-remarks-${s.student_id}" placeholder="Remarks" /></td>
+      <td>
+        <select class="fee-input" id="fee-paymode-${s.student_id}">
+          <option value="OFFLINE">OFFLINE</option>
+          <option value="CASH">CASH</option>
+          <option value="ONLINE">ONLINE</option>
+        </select>
+      </td>
+      <td><input class="fee-input" id="fee-bank-${s.student_id}" placeholder="Bank / Cash" /></td>
+      <td><input class="fee-input" id="fee-utr-${s.student_id}" placeholder="Txn / UTR" /></td>
+      <td><input class="fee-input" id="fee-bankref-${s.student_id}" placeholder="Bank Ref" /></td>
+      <td><input class="fee-input" id="fee-txtype-${s.student_id}" placeholder="Txn Type" /></td>
       <td><input class="fee-input" id="fee-concession-${s.student_id}" type="number" min="0" step="0.01" placeholder="Concession" value="${Number(policy.concession_amount || 0)}" /></td>
       <td><input id="fee-deadline-${s.student_id}" type="date" value="${policy.due_date || ""}" /></td>
       <td>
@@ -107,6 +118,11 @@ export async function recordFee(studentId, generateInvoice = false) {
   const paidEl = document.getElementById(`fee-paid-${studentId}`);
   const remarksEl = document.getElementById(`fee-remarks-${studentId}`);
   const receiptEl = document.getElementById(`fee-receipt-${studentId}`);
+  const payModeEl = document.getElementById(`fee-paymode-${studentId}`);
+  const bankEl = document.getElementById(`fee-bank-${studentId}`);
+  const utrEl = document.getElementById(`fee-utr-${studentId}`);
+  const bankRefEl = document.getElementById(`fee-bankref-${studentId}`);
+  const txnTypeEl = document.getElementById(`fee-txtype-${studentId}`);
 
   const amountPaid = Number(paidEl?.value || 0);
   if (!amountPaid || amountPaid <= 0) {
@@ -120,6 +136,11 @@ export async function recordFee(studentId, generateInvoice = false) {
   form.append("amount_paid", String(amountPaid));
   form.append("amount_total", String(amountTotal));
   form.append("remarks", remarksEl?.value || "");
+  form.append("payment_mode", String(payModeEl?.value || ""));
+  form.append("bank_name", String(bankEl?.value || ""));
+  form.append("txn_utr_no", String(utrEl?.value || ""));
+  form.append("bank_ref_no", String(bankRefEl?.value || ""));
+  form.append("transaction_type", String(txnTypeEl?.value || ""));
   if (receiptEl?.files?.[0]) {
     form.append("receipt", receiptEl.files[0]);
   }
@@ -140,6 +161,11 @@ export async function recordFee(studentId, generateInvoice = false) {
   if (paidEl) paidEl.value = "";
   if (remarksEl) remarksEl.value = "";
   if (receiptEl) receiptEl.value = "";
+  if (payModeEl) payModeEl.value = "OFFLINE";
+  if (bankEl) bankEl.value = "";
+  if (utrEl) utrEl.value = "";
+  if (bankRefEl) bankRefEl.value = "";
+  if (txnTypeEl) txnTypeEl.value = "";
   if (generateInvoice) {
     const feeId = Number(data.fee_id || 0);
     if (feeId) {
