@@ -2428,7 +2428,7 @@ async function feesRecord(request, session, env) {
     `Fee recorded for ${studentId} (INR ${amountPaid})`,
     { fee_id: feeId, student_id: studentId, amount_paid: amountPaid }
   );
-  return json({ status: "ok", message: "Fee recorded" });
+  return json({ status: "ok", message: "Fee recorded", fee_id: feeId });
 }
 
 async function feesReminders(request, session, env) {

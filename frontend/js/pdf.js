@@ -469,8 +469,8 @@ export async function downloadInvoicePdf(invoice) {
     drawAlignedText(page, `ClassName: ${invoice.course || "-"}`, contentLeft, infoY2, contentWidth, "right", 10.5, fontBold, text);
 
     const tableTop = infoY2 - 26;
-    const colWidths = [35, 200, 75, 75, 90, 36];
-    const headers = ["No", "Description", "Total Due", "Concession", "Amount Paid (in Rs.)", "Balance"];
+    const colWidths = [35, 190, 75, 70, 95, 46];
+    const headers = ["No", "Description", "Total Due", "Concession", "Amount Paid (Rs.)", "Balance"];
     const rowHeight = 26;
     const totalTableHeight = rowHeight * 3;
 
@@ -481,7 +481,11 @@ export async function downloadInvoicePdf(invoice) {
     let colX = contentLeft;
     for (let i = 0; i < colWidths.length; i += 1) {
       if (i > 0) page.drawLine({ start: { x: colX, y: tableTop }, end: { x: colX, y: tableTop - totalTableHeight }, thickness: 0.8, color: border });
-      drawAlignedText(page, headers[i], colX, tableTop - 18, colWidths[i], "center", 9, fontBold, text);
+      const headerLines = wrapText(headers[i], colWidths[i] - 6, fontBold, 8.5);
+      const headerStartY = tableTop - 12 - (headerLines.length - 1) * 8;
+      headerLines.slice(0, 2).forEach((line, idx) => {
+        drawAlignedText(page, line, colX + 3, headerStartY - idx * 8, colWidths[i] - 6, "center", 8.5, fontBold, text);
+      });
       colX += colWidths[i];
     }
 
@@ -529,7 +533,7 @@ export async function downloadInvoicePdf(invoice) {
     drawAlignedText(page, "Discount:", modeX + modeCols[0] + modeCols[1] + 6, modeY + 7, modeCols[2] - 12, "left", 9, fontBold, text);
     drawAlignedText(page, formatMoney(concessionAmount), modeX + modeCols[0] + modeCols[1] + modeCols[2], modeY + 7, modeCols[3], "center", 9, fontBold, text);
 
-    const detailsTop = modeY - 26;
+    const detailsTop = modeY - 76;
     page.drawRectangle({ x: contentLeft, y: detailsTop, width: contentWidth, height: 66, borderColor: border, borderWidth: 1 });
     drawCenteredText(page, "Payment Details", detailsTop + 50, 10, fontBold, text, contentLeft, contentWidth);
     page.drawLine({ start: { x: contentLeft, y: detailsTop + 44 }, end: { x: contentRight, y: detailsTop + 44 }, thickness: 0.8, color: border });

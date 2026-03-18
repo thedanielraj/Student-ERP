@@ -91,16 +91,18 @@ export function renderFeesEntryList() {
       <td><input id="fee-deadline-${s.student_id}" type="date" value="${policy.due_date || ""}" /></td>
       <td>
         <button class="btn" data-action="record" data-id="${s.student_id}">Record</button>
+        <button class="btn" data-action="record-invoice" data-id="${s.student_id}">Record + Invoice</button>
         <button class="btn" data-action="save" data-id="${s.student_id}">Save Policy</button>
       </td>
     `;
-    tr.querySelector('[data-action="record"]')?.addEventListener("click", () => recordFee(s.student_id));
+    tr.querySelector('[data-action="record"]')?.addEventListener("click", () => recordFee(s.student_id, false));
+    tr.querySelector('[data-action="record-invoice"]')?.addEventListener("click", () => recordFee(s.student_id, true));
     tr.querySelector('[data-action="save"]')?.addEventListener("click", () => saveFeePolicy(s.student_id));
     body.appendChild(tr);
   });
 }
 
-export async function recordFee(studentId) {
+export async function recordFee(studentId, generateInvoice = false) {
   const totalEl = document.getElementById(`fee-total-${studentId}`);
   const paidEl = document.getElementById(`fee-paid-${studentId}`);
   const remarksEl = document.getElementById(`fee-remarks-${studentId}`);
@@ -132,12 +134,22 @@ export async function recordFee(studentId) {
     alert(err.detail || "Failed to record fee.");
     return;
   }
+  const data = await res.json().catch(() => ({}));
 
   if (totalEl) totalEl.value = "";
   if (paidEl) paidEl.value = "";
   if (remarksEl) remarksEl.value = "";
   if (receiptEl) receiptEl.value = "";
-  alert("Fee recorded.");
+  if (generateInvoice) {
+    const feeId = Number(data.fee_id || 0);
+    if (feeId) {
+      await openFeeInvoicePdf(feeId);
+    } else {
+      alert("Fee recorded, but invoice could not be generated (missing fee ID).");
+    }
+  } else {
+    alert("Fee recorded.");
+  }
 }
 
 export async function saveFeePolicy(studentId) {

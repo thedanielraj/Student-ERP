@@ -2159,7 +2159,7 @@ async def record_fee(
         "amount_paid": amount_paid,
     })
 
-    return {"status": "ok", "message": "Fee recorded"}
+    return {"status": "ok", "message": "Fee recorded", "fee_id": fee_id}
 
 @app.get("/fees/recent")
 def recent_fees(request: Request):
