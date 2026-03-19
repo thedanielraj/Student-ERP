@@ -1,7 +1,7 @@
 import { API } from "./config.js";
 import { state } from "./state.js";
 import { authFetch } from "./api-client.js";
-import { formatMoney } from "./utils.js";
+import { formatMoney, formatDateDDMMYYYY } from "./utils.js";
 
 export async function loadStudents() {
   const res = await authFetch(`${API}/students`);
