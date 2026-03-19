@@ -300,10 +300,17 @@ export async function loadStudentPortalLogins() {
 export async function loadProudAlumni() {
   const homeList = document.getElementById("alumniList");
   const portalList = document.getElementById("portalAlumniList");
+  const urls = [`${API}/public/alumni`, "/api/public/alumni", "/public/alumni"];
+  const withTs = (url) => `${url}${url.includes("?") ? "&" : "?"}ts=${Date.now()}`;
   try {
-    const res = await fetch(`${API}/public/alumni`);
-    if (!res.ok) throw new Error("failed");
-    const rows = await res.json();
+    let rows = null;
+    for (const url of urls) {
+      const res = await fetch(withTs(url), { cache: "no-store" });
+      if (!res.ok) continue;
+      rows = await res.json();
+      break;
+    }
+    if (!rows) throw new Error("failed");
     state.alumniSelectedIds = new Set((rows || []).map((r) => String(r.student_id || "")));
     renderAlumniList(homeList, rows);
     renderAlumniList(portalList, rows);
