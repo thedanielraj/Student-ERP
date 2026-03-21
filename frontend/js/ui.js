@@ -1,6 +1,75 @@
 import { state } from "./state.js";
 import { NATO_BATCHES } from "./config.js";
 
+let perfLoggerInitialized = false;
+const perfLogs = [];
+
+function ensurePerfOverlay() {
+  if (document.getElementById("perfOverlay")) return;
+  const panel = document.createElement("div");
+  panel.id = "perfOverlay";
+  panel.innerHTML = `
+    <div class="perf-title">Perf</div>
+    <div id="perfList"></div>
+  `;
+  document.body.appendChild(panel);
+}
+
+function renderPerfLogs() {
+  const list = document.getElementById("perfList");
+  if (!list) return;
+  list.innerHTML = "";
+  perfLogs.slice(-6).forEach((log) => {
+    const row = document.createElement("div");
+    row.className = "perf-row";
+    row.textContent = `${log.name}: ${log.ms.toFixed(0)} ms`;
+    list.appendChild(row);
+  });
+}
+
+function addPerfLog(name, ms) {
+  perfLogs.push({ name, ms, ts: Date.now() });
+  if (perfLogs.length > 50) perfLogs.shift();
+  renderPerfLogs();
+}
+
+function wrapWindowFn(fnName) {
+  const fn = window[fnName];
+  if (typeof fn !== "function" || fn.__perfWrapped) return;
+  const wrapped = async (...args) => {
+    const start = performance.now();
+    try {
+      return await fn(...args);
+    } finally {
+      addPerfLog(fnName, performance.now() - start);
+    }
+  };
+  wrapped.__perfWrapped = true;
+  window[fnName] = wrapped;
+}
+
+export function initPerfLogger() {
+  if (perfLoggerInitialized) return;
+  if (!state.authInfo || state.authInfo.role !== "superuser") return;
+  perfLoggerInitialized = true;
+  ensurePerfOverlay();
+  const fnNames = [
+    "loadStudents",
+    "renderTodayAttendance",
+    "renderBackAttendance",
+    "loadRecentAttendance",
+    "loadAttendanceCalendar",
+    "loadFeed",
+    "loadAnnouncements",
+    "loadNotifications",
+    "loadTimetable",
+    "loadInterviews",
+    "loadFees",
+    "loadBalance"
+  ];
+  fnNames.forEach(wrapWindowFn);
+}
+
 export function toggleSidebar(scope) {
   const key = scope === "home" ? "homeSidebarOpen" : "appSidebarOpen";
   const hamburger = document.querySelector(scope === "home" ? ".home-hamburger" : ".app-hamburger");
@@ -70,10 +139,9 @@ export function switchSection(target) {
 
   // Call relevant loaders based on section
   const loaders = {
+    students: () => { if (window.loadStudents) window.loadStudents(); },
     attendance: () => {
       if (window.ensureAttendanceDateConstraints) window.ensureAttendanceDateConstraints();
-      if (window.renderTodayAttendance) window.renderTodayAttendance();
-      if (window.renderBackAttendance) window.renderBackAttendance();
       if (window.loadAttendanceCalendar) window.loadAttendanceCalendar();
     },
     fees: () => {
@@ -183,22 +251,7 @@ export function showToast(message, variant = "") {
 }
 
 export function afterLoginInit() {
-  if (window.loadStudents) window.loadStudents();
-  if (window.loadRecentAttendance) window.loadRecentAttendance();
-  if (window.loadFeed) window.loadFeed();
-  if (window.loadTimetable) window.loadTimetable();
-  if (window.loadInterviews) window.loadInterviews();
-  if (window.loadAnnouncements) window.loadAnnouncements();
-  if (window.loadNotifications) window.loadNotifications();
-  if (window.loadTests) window.loadTests();
-  if (window.loadFeeSummary) window.loadFeeSummary();
-  if (state.authInfo && state.authInfo.role === "superuser") {
-    if (window.loadFeePolicies) window.loadFeePolicies();
-    if (window.loadRecentFees) window.loadRecentFees();
-    if (window.loadReports) window.loadReports();
-  } else {
-    if (window.loadStudentFeeSummary) window.loadStudentFeeSummary();
-  }
+  if (window.initPerfLogger) window.initPerfLogger();
   if (window.initAnnouncementNotifier) window.initAnnouncementNotifier();
   const savedSection = localStorage.getItem("activeSection")
     || (state.authInfo && state.authInfo.role === "student" ? "attendance" : "feed");

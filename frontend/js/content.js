@@ -5,8 +5,11 @@ import {
   formatMoney,
   formatDateDDMMYYYY,
   setText,
-  renderSimpleList
+  renderSimpleList,
+  value,
+  clearInputs
 } from "./utils.js";
+import { showToast } from "./ui.js";
 
 export async function loadFeed() {
   const res = await authFetch(`${API}/feed`);
@@ -69,6 +72,32 @@ export async function loadAnnouncements() {
   renderSimpleList("announcementList", rows.map(a => `${a.title} • ${a.message}`), "No announcements");
 }
 
+export async function addAnnouncement() {
+  if (!state.authInfo || state.authInfo.role === "student") {
+    showToast("Only staff can post announcements.");
+    return;
+  }
+  const title = value("anTitle");
+  const message = value("anMessage");
+  if (!title || !message) {
+    showToast("Title and message are required.");
+    return;
+  }
+  const res = await authFetch(`${API}/announcements`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, message }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    showToast(err.detail || "Failed to post announcement.");
+    return;
+  }
+  clearInputs(["anTitle", "anMessage"]);
+  await Promise.all([loadAnnouncements(), window.loadFeed ? window.loadFeed() : null]);
+  showToast("Announcement posted.", "success");
+}
+
 export async function loadNotifications() {
   const res = await authFetch(`${API}/notifications`);
   if (!res.ok) return;
@@ -96,6 +125,39 @@ export async function loadNotifications() {
     }
     list.appendChild(li);
   });
+}
+
+export async function addNotification() {
+  if (!state.authInfo || state.authInfo.role === "student") {
+    showToast("Only staff can send notifications.");
+    return;
+  }
+  const title = value("ntTitle");
+  const message = value("ntMessage");
+  const targetUserRaw = value("ntTarget");
+  if (!title || !message) {
+    showToast("Title and message are required.");
+    return;
+  }
+  const payload = {
+    title,
+    message,
+    level: "info",
+    target_user: targetUserRaw || null,
+  };
+  const res = await authFetch(`${API}/notifications`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    showToast(err.detail || "Failed to send notification.");
+    return;
+  }
+  clearInputs(["ntTitle", "ntMessage", "ntTarget"]);
+  await Promise.all([loadNotifications(), window.loadFeed ? window.loadFeed() : null]);
+  showToast("Notification sent.", "success");
 }
 
 export async function initAnnouncementNotifier() {

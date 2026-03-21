@@ -7,7 +7,7 @@
   <title>Arunand's Aviation ERP</title>
   <meta name="description" content="Arunand's Aviation Institute — aviation training for Ground Operations and Cabin Crew with admissions, attendance, and fee tracking." />
   <meta property="og:title" content="Arunand's Aviation Institute" />
-  <meta property="og:description" content="Industry-focused aviation training with admissions, attendance, and fee tracking in one portal." />
+  <meta property="og:description" content="Industry-focused aviation training with admissions, attendance, and fee tracking in one portal. Now offering CPL Ground Classes." />
   <meta property="og:type" content="website" />
   <meta property="og:image" content="/assets/logo.png" />
   <meta property="og:url" content="/" />
@@ -39,7 +39,7 @@
     <main class="home-main">
       <section id="homeWelcome" class="panel">
         <h1>Welcome To Arunand's Aviation Institute</h1>
-        <p>Industry-focused training for Ground Operations and Cabin Crew careers.</p>
+        <p>Industry-focused training for Ground Operations, Cabin Crew, and CPL Ground Classes.</p>
         <div class="home-actions">
           <button class="btn primary" onclick="showAdmissionForm()">Apply For Admission</button>
           <button class="btn" onclick="openPortal('student')">Open Student Portal</button>
@@ -62,7 +62,7 @@
           <article class="course-card">
             <h3>Ground Operations</h3>
             <div class="course-meta">
-              <div><strong>Duration:</strong> 3 Months</div>
+              <div><strong>Duration:</strong> 6 Months</div>
               <div><strong>Eligibility:</strong> 10+2 Pass</div>
               <div><strong>Fee:</strong> Contact us for the latest fee details</div>
             </div>
@@ -71,11 +71,20 @@
           <article class="course-card">
             <h3>Cabin Crew</h3>
             <div class="course-meta">
-              <div><strong>Duration:</strong> 3.5 Months</div>
+              <div><strong>Duration:</strong> 8 Months</div>
               <div><strong>Eligibility:</strong> 10+2 Pass</div>
               <div><strong>Fee:</strong> Contact us for the latest fee details</div>
             </div>
             <p class="meta">Focus on in-flight hospitality, grooming, safety drills, and customer service excellence.</p>
+          </article>
+          <article class="course-card">
+            <h3>CPL Ground Classes</h3>
+            <div class="course-meta">
+              <div><strong>Duration:</strong> 6 Months</div>
+              <div><strong>Eligibility:</strong> 10+2 Pass</div>
+              <div><strong>Fee:</strong> Contact us for the latest fee details</div>
+            </div>
+            <p class="meta">Commercial Pilot License (CPL) ground training covering core aviation theory and exam prep.</p>
           </article>
         </div>
       </section>
@@ -118,6 +127,7 @@
             <option value="">Select Interest</option>
             <option value="Ground Operations">Ground Operations</option>
             <option value="Cabin Crew">Cabin Crew</option>
+            <option value="CPL Ground Classes">CPL Ground Classes</option>
             <option value="General Inquiry">General Inquiry</option>
           </select>
           <button class="btn primary" onclick="submitHomeInquiry()">Submit Inquiry</button>
@@ -147,6 +157,7 @@
             <option value="">Select Course</option>
             <option value="Ground Operations">Ground Operations</option>
             <option value="Cabin Crew">Cabin Crew</option>
+            <option value="CPL Ground Classes">CPL Ground Classes</option>
           </select>
         </div>
 
@@ -218,7 +229,7 @@
       <input id="loginUser" list="studentLoginList" placeholder="Username" />
       <datalist id="studentLoginList"></datalist>
       <input id="loginPass" type="password" placeholder="Password" />
-      <button class="btn primary" onclick="handleLogin()">Sign In</button>
+      <button id="loginBtn" class="btn primary" onclick="handleLogin()">Sign In</button>
       <button class="btn" onclick="showHome()">Back</button>
       <div id="loginError" class="login-error hidden">Invalid credentials</div>
     </div>
@@ -472,9 +483,14 @@
           </div>
           <div class="form-row">
             <input id="name" placeholder="Student Name" />
-            <input id="course" placeholder="Course (Ground/Cabin Crew)" />
+            <input id="course" list="courseList" placeholder="Course (Ground Ops / Cabin Crew / CPL Ground Classes)" />
             <input id="batch" list="natoBatchList" placeholder="Batch (NATO naming)" />
             <datalist id="natoBatchList"></datalist>
+            <datalist id="courseList">
+              <option value="Ground Operations"></option>
+              <option value="Cabin Crew"></option>
+              <option value="CPL Ground Classes"></option>
+            </datalist>
             <button class="btn primary" onclick="addStudent()">Add Student</button>
           </div>
         </section>
@@ -524,7 +540,7 @@
           </div>
           <div class="form-row attendance-form">
             <div class="meta">Date: <strong id="todayAttendanceDate">-</strong></div>
-            <button class="btn" onclick="renderTodayAttendance()">Load Students</button>
+            <button id="loadTodayAttendanceBtn" class="btn" onclick="renderTodayAttendance()">Load Students</button>
             <button class="btn primary" onclick="submitTodayAttendance()">Submit Today's Attendance</button>
           </div>
           <div class="attendance-meta">
@@ -583,7 +599,7 @@
           </div>
           <div class="form-row attendance-form">
             <input id="backDate" type="date" />
-            <button class="btn" onclick="renderBackAttendance()">Load Date</button>
+            <button id="loadBackAttendanceBtn" class="btn" onclick="renderBackAttendance()">Load Date</button>
             <button class="btn primary" onclick="submitBackAttendance()">Submit Backdated Attendance</button>
           </div>
           <div class="attendance-meta">

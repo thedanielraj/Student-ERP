@@ -3,6 +3,8 @@ import { authFetch } from "./api-client.js";
 import { state } from "./state.js";
 import { applyRoleUI, afterLoginInit, setSidebarOpen } from "./ui.js";
 
+let loginInFlight = false;
+
 export async function initAuth() {
   if (state.parentMode) return;
   const token = localStorage.getItem(TOKEN_KEY);
@@ -22,40 +24,78 @@ export async function initAuth() {
 }
 
 export async function handleLogin() {
+  if (loginInFlight) return;
+  loginInFlight = true;
   const user = document.getElementById("loginUser").value.trim();
   const pass = document.getElementById("loginPass").value.trim();
   const error = document.getElementById("loginError");
-  if (!error) return;
+  const loginBtn = document.getElementById("loginBtn");
+  const prevText = loginBtn ? loginBtn.textContent : "";
+  if (loginBtn) {
+    loginBtn.disabled = true;
+    loginBtn.classList.add("loading");
+    loginBtn.textContent = "Signing in...";
+  }
+  if (!error) {
+    loginInFlight = false;
+    if (loginBtn) {
+      loginBtn.disabled = false;
+      loginBtn.classList.remove("loading");
+      loginBtn.textContent = prevText || "Sign In";
+    }
+    return;
+  }
   error.classList.add("hidden");
 
   if (!user || !pass) {
     error.textContent = "Enter username and password.";
     error.classList.remove("hidden");
+    loginInFlight = false;
+    if (loginBtn) {
+      loginBtn.disabled = false;
+      loginBtn.classList.remove("loading");
+      loginBtn.textContent = prevText || "Sign In";
+    }
     return;
   }
 
   if (state.portalMode === "student" && !/^AAI/i.test(user)) {
     error.textContent = "Use your AAI student ID in student portal.";
     error.classList.remove("hidden");
+    loginInFlight = false;
+    if (loginBtn) {
+      loginBtn.disabled = false;
+      loginBtn.classList.remove("loading");
+      loginBtn.textContent = prevText || "Sign In";
+    }
     return;
   }
 
-  const res = await fetch(`${API}/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username: user, password: pass })
-  });
+  try {
+    const res = await fetch(`${API}/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: user, password: pass })
+    });
 
-  if (!res.ok) {
-    error.textContent = "Invalid credentials.";
-    error.classList.remove("hidden");
-    return;
+    if (!res.ok) {
+      error.textContent = "Invalid credentials.";
+      error.classList.remove("hidden");
+      return;
+    }
+
+    const data = await res.json();
+    localStorage.setItem(TOKEN_KEY, data.token);
+    showApp();
+    await initAuth();
+  } finally {
+    loginInFlight = false;
+    if (loginBtn) {
+      loginBtn.disabled = false;
+      loginBtn.classList.remove("loading");
+      loginBtn.textContent = prevText || "Sign In";
+    }
   }
-
-  const data = await res.json();
-  localStorage.setItem(TOKEN_KEY, data.token);
-  showApp();
-  await initAuth();
 }
 
 export async function openPortal(mode) {

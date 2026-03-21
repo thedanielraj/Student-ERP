@@ -1,4 +1,4 @@
-const CACHE_NAME = "aai-erp-v4";
+const CACHE_NAME = "aai-erp-v5";
 const APP_SHELL = [
   "/",
   "/index.html",

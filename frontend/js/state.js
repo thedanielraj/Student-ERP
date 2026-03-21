@@ -1,5 +1,6 @@
 export const state = {
   allStudents: [],
+  studentById: new Map(),
   selectedId: null,
   authInfo: null,
   studentFeeSummary: null,
@@ -26,6 +27,7 @@ export const state = {
     initialized: false,
     step: "greeting",
     intent: "",
+    aiAvailable: true,
     profile: { name: "", age: "", qualification: "", location: "", phone: "", preferred_time: "" },
   },
   currentAttempt: null,

@@ -3,13 +3,98 @@ import { state } from "./state.js";
 import { authFetch } from "./api-client.js";
 import { formatMoney, formatDateDDMMYYYY } from "./utils.js";
 
-export async function loadStudents() {
-  const res = await authFetch(`${API}/students`);
-  state.allStudents = await res.json();
-  const validIds = new Set(state.allStudents.map((s) => String(s.student_id)));
-  state.selectedStudentIds = new Set(Array.from(state.selectedStudentIds).filter((id) => validIds.has(id)));
-  renderStudentList();
-  if (window.updateSideCounts) window.updateSideCounts();
+let studentsLoadingPromise = null;
+let studentRenderToken = 0;
+
+function bindStudentListHandlers() {
+  const list = document.getElementById("studentList");
+  if (!list || list.dataset.bound === "1") return;
+  list.dataset.bound = "1";
+
+  list.addEventListener("change", (e) => {
+    const target = e.target;
+    if (!target.classList.contains("student-select")) return;
+    const sid = String(target.dataset.id || "");
+    if (!sid) return;
+    if (target.checked) state.selectedStudentIds.add(sid);
+    else state.selectedStudentIds.delete(sid);
+    updateSelectedCount();
+  });
+
+  list.addEventListener("click", (e) => {
+    const target = e.target;
+    if (target.classList.contains("student-select")) return;
+    if (target.dataset.action === "alumni") {
+      markSingleAlumni(String(target.dataset.id || ""));
+      return;
+    }
+    if (target.dataset.action === "delete") {
+      deleteSingleStudent(String(target.dataset.id || ""));
+      return;
+    }
+    const li = target.closest("li.student-item");
+    if (!li) return;
+    const sid = String(li.dataset.id || "");
+    if (!sid) return;
+    const student = state.studentById.get(sid);
+    if (student) selectStudent(student);
+  });
+}
+
+function renderStudentRow(student) {
+  const li = document.createElement("li");
+  li.className = "student-item";
+  li.dataset.id = String(student.student_id);
+  if (String(student.student_id) === String(state.selectedId)) {
+    li.classList.add("active");
+  }
+  const isChecked = state.selectedStudentIds.has(String(student.student_id));
+  const dueAmount = Number(student.fee_due);
+  const feeLabel = Number.isFinite(dueAmount) ? `INR ${formatMoney(dueAmount)}` : "INR -";
+  li.innerHTML = `
+      <div class="student-row-top">
+        <div class="student-row-main">
+          <input type="checkbox" class="student-select" data-id="${student.student_id}" ${isChecked ? "checked" : ""} />
+          <div><strong>${student.student_name}</strong></div>
+        </div>
+        <div class="student-fee-total">Due: ${feeLabel}</div>
+      </div>
+      <div class="student-meta">ID: ${student.student_id} | ${student.course} | ${student.batch} | ${student.status || "Active"}</div>
+      <div class="student-actions">
+        <button class="btn" data-action="alumni" data-id="${student.student_id}">Mark Alumni</button>
+        <button class="btn" data-action="delete" data-id="${student.student_id}">Delete</button>
+      </div>
+    `;
+  return li;
+}
+
+export async function loadStudents(options = {}) {
+  const { renderList = true } = options;
+  if (studentsLoadingPromise) return studentsLoadingPromise;
+  studentsLoadingPromise = (async () => {
+    const res = await authFetch(`${API}/students`);
+    if (!res.ok) return [];
+    const data = await res.json().catch(() => ([]));
+    state.allStudents = Array.isArray(data) ? data : [];
+    state.studentById = new Map(state.allStudents.map((s) => [String(s.student_id), s]));
+    const validIds = new Set(state.allStudents.map((s) => String(s.student_id)));
+    state.selectedStudentIds = new Set(Array.from(state.selectedStudentIds).filter((id) => validIds.has(id)));
+    if (renderList) {
+      renderStudentList();
+      if (window.updateSideCounts) window.updateSideCounts();
+    }
+    return state.allStudents;
+  })();
+  try {
+    return await studentsLoadingPromise;
+  } finally {
+    studentsLoadingPromise = null;
+  }
+}
+
+export async function ensureStudentsLoaded(options = {}) {
+  if (state.allStudents.length) return state.allStudents;
+  return loadStudents(options);
 }
 
 export function renderStudentList() {
@@ -19,6 +104,7 @@ export function renderStudentList() {
   const list = document.getElementById("studentList");
   const searchInput = document.getElementById("search");
   if (!list || !searchInput) return;
+  bindStudentListHandlers();
   const search = searchInput.value.trim().toLowerCase();
   list.innerHTML = "";
 
@@ -43,49 +129,23 @@ export function renderStudentList() {
     return;
   }
 
-  filtered.forEach((s) => {
-    const li = document.createElement("li");
-    li.className = "student-item";
-    if (String(s.student_id) === String(state.selectedId)) {
-      li.classList.add("active");
+  const token = ++studentRenderToken;
+  let idx = 0;
+  const chunkSize = 60;
+  const renderChunk = () => {
+    if (studentRenderToken !== token) return;
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < chunkSize && idx < filtered.length; i += 1, idx += 1) {
+      frag.appendChild(renderStudentRow(filtered[idx]));
     }
-    const isChecked = state.selectedStudentIds.has(String(s.student_id));
-    const dueAmount = Number(s.fee_due);
-    const feeLabel = Number.isFinite(dueAmount) ? `INR ${formatMoney(dueAmount)}` : "INR -";
-    li.innerHTML = `
-      <div class="student-row-top">
-        <div class="student-row-main">
-          <input type="checkbox" class="student-select" data-id="${s.student_id}" ${isChecked ? "checked" : ""} />
-          <div><strong>${s.student_name}</strong></div>
-        </div>
-        <div class="student-fee-total">Due: ${feeLabel}</div>
-      </div>
-      <div class="student-meta">ID: ${s.student_id} | ${s.course} | ${s.batch} | ${s.status || "Active"}</div>
-      <div class="student-actions">
-        <button class="btn" data-action="alumni" data-id="${s.student_id}">Mark Alumni</button>
-        <button class="btn" data-action="delete" data-id="${s.student_id}">Delete</button>
-      </div>
-    `;
-    li.addEventListener("click", () => selectStudent(s));
-    li.querySelector(".student-select")?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const sid = String(e.target.dataset.id || "");
-      if (!sid) return;
-      if (e.target.checked) state.selectedStudentIds.add(sid);
-      else state.selectedStudentIds.delete(sid);
-      updateSelectedCount();
-    });
-    li.querySelector('[data-action="alumni"]')?.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      await markSingleAlumni(String(e.target.dataset.id || ""));
-    });
-    li.querySelector('[data-action="delete"]')?.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      await deleteSingleStudent(String(e.target.dataset.id || ""));
-    });
-    list.appendChild(li);
-  });
-  updateSelectedCount();
+    list.appendChild(frag);
+    if (idx < filtered.length) {
+      requestAnimationFrame(renderChunk);
+      return;
+    }
+    updateSelectedCount();
+  };
+  requestAnimationFrame(renderChunk);
 }
 
 export function updateSelectedCount() {

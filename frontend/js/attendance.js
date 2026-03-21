@@ -1,12 +1,17 @@
 import { API, ATTENDANCE_QUEUE_KEY } from "./config.js";
 import { state } from "./state.js";
 import { authFetch } from "./api-client.js";
+import { ensureStudentsLoaded } from "./students.js";
 import {
   getTodayIso,
   formatDateDDMMYYYY,
   downloadCsv
 } from "./utils.js";
 import { showToast } from "./ui.js";
+
+let attendanceRenderToken = 0;
+let todayRenderInFlight = false;
+let backRenderInFlight = false;
 
 export function ensureAttendanceDateConstraints() {
   const today = getTodayIso();
@@ -60,56 +65,117 @@ export function renderAttendanceForm(date, opts) {
     return;
   }
 
-  rollCallStudents.forEach((s) => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${s.student_name} (ID: ${s.student_id})</td>
-      <td>${s.batch}</td>
-      <td>
-        <label>
-          <input type="checkbox" class="${toggleClass}" data-id="${s.student_id}">
-          Present
-        </label>
-      </td>
-      <td>
-        <input class="${remarkClass}" data-id="${s.student_id}" placeholder="Remarks (optional)" />
-      </td>
-    `;
-    body.appendChild(tr);
-  });
+  if (body.dataset.toggleClass !== toggleClass) {
+    body.addEventListener("change", (e) => {
+      const target = e.target;
+      if (!target.classList.contains(toggleClass)) return;
+      updateAttendanceCounts(toggleClass, presentId, absentId);
+    });
+    body.dataset.toggleClass = toggleClass;
+  }
 
-  document.querySelectorAll(`.${toggleClass}`).forEach((cb) => {
-    cb.addEventListener("change", () => updateAttendanceCounts(toggleClass, presentId, absentId));
-  });
-  updateAttendanceCounts(toggleClass, presentId, absentId);
+  const token = ++attendanceRenderToken;
+  let idx = 0;
+  const chunkSize = 80;
+  const renderChunk = () => {
+    if (attendanceRenderToken !== token) return;
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < chunkSize && idx < rollCallStudents.length; i += 1, idx += 1) {
+      const s = rollCallStudents[idx];
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${s.student_name} (ID: ${s.student_id})</td>
+        <td>${s.batch}</td>
+        <td>
+          <label>
+            <input type="checkbox" class="${toggleClass}" data-id="${s.student_id}">
+            Present
+          </label>
+        </td>
+        <td>
+          <input class="${remarkClass}" data-id="${s.student_id}" placeholder="Remarks (optional)" />
+        </td>
+      `;
+      frag.appendChild(tr);
+    }
+    body.appendChild(frag);
+    if (idx < rollCallStudents.length) {
+      requestAnimationFrame(renderChunk);
+      return;
+    }
+    updateAttendanceCounts(toggleClass, presentId, absentId);
+  };
+  requestAnimationFrame(renderChunk);
 }
 
-export function renderTodayAttendance() {
+export async function renderTodayAttendance() {
   if (state.authInfo && state.authInfo.role === "student") return;
+  if (todayRenderInFlight) return;
+  todayRenderInFlight = true;
+  const btn = document.getElementById("loadTodayAttendanceBtn");
+  const prevText = btn ? btn.textContent : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add("loading");
+    btn.textContent = "Loading...";
+  }
   ensureAttendanceDateConstraints();
-  renderAttendanceForm(getTodayIso(), {
-    bodyId: "todayAttendanceBody",
-    toggleClass: "today-present-toggle",
-    remarkClass: "today-remark-input",
-    presentId: "todayPresentCount",
-    absentId: "todayAbsentCount",
-    emptyMsg: "All current students are marked as alumni/selected. No roll call entries.",
-  });
+  try {
+    if (!state.allStudents.length) {
+      await ensureStudentsLoaded({ renderList: false });
+    }
+    renderAttendanceForm(getTodayIso(), {
+      bodyId: "todayAttendanceBody",
+      toggleClass: "today-present-toggle",
+      remarkClass: "today-remark-input",
+      presentId: "todayPresentCount",
+      absentId: "todayAbsentCount",
+      emptyMsg: "All current students are marked as alumni/selected. No roll call entries.",
+    });
+  } finally {
+    todayRenderInFlight = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove("loading");
+      btn.textContent = prevText || "Load Students";
+    }
+  }
 }
 
-export function renderBackAttendance() {
+export async function renderBackAttendance() {
   if (state.authInfo && state.authInfo.role === "student") return;
+  if (backRenderInFlight) return;
+  backRenderInFlight = true;
+  const btn = document.getElementById("loadBackAttendanceBtn");
+  const prevText = btn ? btn.textContent : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add("loading");
+    btn.textContent = "Loading...";
+  }
   ensureAttendanceDateConstraints();
   const dateInput = document.getElementById("backDate");
   const date = dateInput?.value || "";
-  renderAttendanceForm(date, {
-    bodyId: "backAttendanceBody",
-    toggleClass: "back-present-toggle",
-    remarkClass: "back-remark-input",
-    presentId: "backPresentCount",
-    absentId: "backAbsentCount",
-    emptyMsg: "All current students are marked as alumni/selected. No roll call entries.",
-  });
+  try {
+    if (!state.allStudents.length) {
+      await ensureStudentsLoaded({ renderList: false });
+    }
+    renderAttendanceForm(date, {
+      bodyId: "backAttendanceBody",
+      toggleClass: "back-present-toggle",
+      remarkClass: "back-remark-input",
+      presentId: "backPresentCount",
+      absentId: "backAbsentCount",
+      emptyMsg: "All current students are marked as alumni/selected. No roll call entries.",
+    });
+  } finally {
+    backRenderInFlight = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove("loading");
+      btn.textContent = prevText || "Load Date";
+    }
+  }
 }
 
 export function updateAttendanceCounts(toggleClass, presentId, absentId) {

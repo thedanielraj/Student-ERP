@@ -43,6 +43,32 @@ function extractPhoneNumber(text) {
   return /^\d{10}$/.test(digits) ? digits : "";
 }
 
+async function requestAiReply(message) {
+  if (!state.chatbotState.aiAvailable) return null;
+  try {
+    const res = await fetch(`${API}/chatbot/ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message,
+        profile: state.chatbotState.profile,
+        intent: state.chatbotState.intent,
+      }),
+    });
+    if (!res.ok) {
+      if ([402, 429, 502, 503].includes(res.status)) {
+        state.chatbotState.aiAvailable = false;
+      }
+      return null;
+    }
+    const data = await res.json().catch(() => ({}));
+    const reply = String(data.reply || "").trim();
+    return reply || null;
+  } catch (_) {
+    return null;
+  }
+}
+
 async function submitChatbotLead() {
   const payload = {
     name: state.chatbotState.profile.name,
@@ -146,7 +172,7 @@ export async function sendChatbotMessage() {
       return;
     }
     if (choice === "2" || /course|courses/.test(lower)) {
-      addChatbotMessage("bot", "We offer Ground Operations and Cabin Crew.\nWould you like details for a specific course?");
+      addChatbotMessage("bot", "We offer Ground Operations, Cabin Crew, and CPL Ground Classes.\nWould you like details for a specific course?");
       return;
     }
     if (choice === "3" || /fee|fees|cost|price/.test(lower)) {
@@ -154,7 +180,7 @@ export async function sendChatbotMessage() {
       return;
     }
     if (choice === "4" || /eligibility|eligible|criteria/.test(lower)) {
-      addChatbotMessage("bot", "Eligibility typically requires 10+2 pass and good communication skills.\nWant the detailed criteria for Ground Operations or Cabin Crew?");
+      addChatbotMessage("bot", "Eligibility typically requires 10+2 pass and good communication skills.\nWant the detailed criteria for Ground Operations, Cabin Crew, or CPL Ground Classes?");
       return;
     }
     if (choice === "5" || /counsellor|counselor|call|talk/.test(lower)) {
@@ -179,6 +205,11 @@ export async function sendChatbotMessage() {
         return;
       }
       addChatbotMessage("bot", "We have seasonal offers. Please share your 10 digit phone number.");
+      return;
+    }
+    const aiReply = await requestAiReply(text);
+    if (aiReply) {
+      addChatbotMessage("bot", aiReply);
       return;
     }
     addChatbotMessage("bot", "You can type a number (1-6) or say things like 'fees', 'courses', or 'talk to counsellor'.");

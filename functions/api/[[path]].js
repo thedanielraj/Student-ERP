@@ -541,9 +541,6 @@ async function chatbotAsk(request, env) {
   const profile = body.profile && typeof body.profile === "object" ? body.profile : {};
   const intent = String(body.intent || "").trim();
   if (!message) throw httpError(400, "Message is required.");
-  if (!env.AI || typeof env.AI.run !== "function") {
-    throw httpError(503, "AI is not configured.");
-  }
 
   const name = String(profile.name || "").trim();
   const age = String(profile.age || "").trim();
@@ -560,7 +557,7 @@ async function chatbotAsk(request, env) {
     "You are the official chatbot for Arunand's Aviation Institute in Bangalore. " +
     "Be warm, concise, and professional. " +
     "If asked about fees, use INR 1,50,000 (1.5 lakh) as the total fee. " +
-    "Courses: Ground Operations (3 months) and Cabin Crew (3.5 months). " +
+    "Courses: Ground Operations (6 months), Cabin Crew (8 months), and CPL Ground Classes (6 months). " +
     "Eligibility is typically 10+2 pass. " +
     "The institute is based in Bangalore. " +
     "For documents, mention 10th/12th marksheets, Aadhaar/ID, and passport photos. " +
@@ -574,14 +571,49 @@ async function chatbotAsk(request, env) {
   }
   messages.push({ role: "user", content: message });
 
+  const fallbackReply = () => {
+    const lower = message.toLowerCase();
+    if (/cpl|commercial pilot|pilot/.test(lower)) {
+      return "We offer CPL Ground Classes (Commercial Pilot License) with a 6-month duration. Would you like details on syllabus or fees?";
+    }
+    if (/course|courses|program/.test(lower)) {
+      return "We offer Ground Operations (6 months), Cabin Crew (8 months), and CPL Ground Classes (6 months). Which course would you like details for?";
+    }
+    if (/fee|fees|cost|price/.test(lower)) {
+      return "Fees depend on the course and current schedule. Please share the course name and we will connect you with the latest fee details.";
+    }
+    if (/eligibility|eligible|criteria/.test(lower)) {
+      return "Eligibility typically requires 10+2 pass and good communication skills. Want the detailed criteria for a specific course?";
+    }
+    if (/counsellor|counselor|call|talk/.test(lower)) {
+      return "Sure. Please share your phone number and preferred time to receive a call.";
+    }
+    if (/location|address|bangalore|bengaluru/.test(lower)) {
+      return "We are based in Bangalore. Would you like our exact location and contact details?";
+    }
+    return "Thanks for reaching out! We can help with courses, fees, eligibility, and admissions. What would you like to know?";
+  };
+
+  if (!env.AI || typeof env.AI.run !== "function") {
+    const reply = fallbackReply();
+    await recordChatbotLead(message, reply, profile, intent, env);
+    return json({ reply });
+  }
+
   let response;
   try {
     response = await env.AI.run("@cf/meta/llama-3-8b-instruct", { messages });
   } catch (err) {
-    throw httpError(502, "AI request failed.");
+    const reply = fallbackReply();
+    await recordChatbotLead(message, reply, profile, intent, env);
+    return json({ reply });
   }
   const reply = String(response?.response || response?.result?.response || response?.text || "").trim();
-  if (!reply) throw httpError(502, "AI did not return a response.");
+  if (!reply) {
+    const fallback = fallbackReply();
+    await recordChatbotLead(message, fallback, profile, intent, env);
+    return json({ reply: fallback });
+  }
   await recordChatbotLead(message, reply, profile, intent, env);
   return json({ reply });
 }
