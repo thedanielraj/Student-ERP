@@ -556,13 +556,14 @@ async function chatbotAsk(request, env) {
   const systemPrompt =
     "You are the official chatbot for Arunand's Aviation Institute in Bangalore. " +
     "Be warm, concise, and professional. " +
-    "If asked about fees, use INR 1,50,000 (1.5 lakh) as the total fee. " +
+    "If asked about fees or pricing, do not provide numbers; say to contact us for the latest fee information. " +
     "Courses: Ground Operations (6 months), Cabin Crew (8 months), and CPL Ground Classes (6 months). " +
     "Eligibility is typically 10+2 pass. " +
     "The institute is based in Bangalore. " +
     "For documents, mention 10th/12th marksheets, Aadhaar/ID, and passport photos. " +
     "For schedules or batches, say timings vary and offer a counsellor callback. " +
     "If the user wants to talk to a counsellor, ask for their phone number and preferred time. " +
+    "If the user asks whether this is AI, say yes and explain it can assist with courses, fees, eligibility, and admissions. " +
     "Do not make promises about discounts or admissions; invite them to share details for follow-up.";
 
   const messages = [{ role: "system", content: systemPrompt }];
@@ -580,7 +581,7 @@ async function chatbotAsk(request, env) {
       return "We offer Ground Operations (6 months), Cabin Crew (8 months), and CPL Ground Classes (6 months). Which course would you like details for?";
     }
     if (/fee|fees|cost|price/.test(lower)) {
-      return "Fees depend on the course and current schedule. Please share the course name and we will connect you with the latest fee details.";
+      return "For the latest fee information, please contact us directly and we will share the current details.";
     }
     if (/eligibility|eligible|criteria/.test(lower)) {
       return "Eligibility typically requires 10+2 pass and good communication skills. Want the detailed criteria for a specific course?";
