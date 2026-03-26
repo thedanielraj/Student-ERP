@@ -211,6 +211,9 @@
           <button class="chatbot-close" onclick="toggleChatbot()">Close</button>
         </div>
         <div id="chatbotMessages" class="chatbot-messages"></div>
+        <div id="chatbotTyping" class="chatbot-typing hidden" aria-live="polite">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        </div>
         <div class="chatbot-input">
           <input id="chatbotInput" placeholder="Type your message..." />
           <button class="btn primary" onclick="sendChatbotMessage()">Send</button>

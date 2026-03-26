@@ -38,6 +38,16 @@ export function addChatbotMessage(role, text) {
   messages.scrollTop = messages.scrollHeight;
 }
 
+function setTypingIndicator(show) {
+  const typing = document.getElementById("chatbotTyping");
+  if (!typing) return;
+  typing.classList.toggle("hidden", !show);
+  const messages = document.getElementById("chatbotMessages");
+  if (show && messages) {
+    messages.scrollTop = messages.scrollHeight;
+  }
+}
+
 function extractPhoneNumber(text) {
   const digits = String(text || "").replace(/\D/g, "");
   return /^\d{10}$/.test(digits) ? digits : "";
@@ -101,6 +111,19 @@ export async function sendChatbotMessage() {
   if (input) input.value = "";
 
   const lower = text.toLowerCase();
+
+  if (!["ask_phone", "ask_time"].includes(state.chatbotState.step)) {
+    setTypingIndicator(true);
+    try {
+      const aiReply = await requestAiReply(text);
+      if (aiReply) {
+        addChatbotMessage("bot", aiReply);
+        return;
+      }
+    } finally {
+      setTypingIndicator(false);
+    }
+  }
 
   if (state.chatbotState.step === "ask_name") {
     state.chatbotState.profile.name = text.split(" ")[0] || text;
@@ -205,11 +228,6 @@ export async function sendChatbotMessage() {
         return;
       }
       addChatbotMessage("bot", "We have seasonal offers. Please share your 10 digit phone number.");
-      return;
-    }
-    const aiReply = await requestAiReply(text);
-    if (aiReply) {
-      addChatbotMessage("bot", aiReply);
       return;
     }
     addChatbotMessage("bot", "You can type a number (1-6) or say things like 'fees', 'courses', or 'talk to counsellor'.");
