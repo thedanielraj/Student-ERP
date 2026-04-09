@@ -1872,21 +1872,28 @@ async function studentsMarkAlumni(request, session, env) {
   const studentIds = normalizeStudentIds(body.student_ids);
   if (!studentIds.length) throw httpError(400, "Invalid payload");
   const previousStatus = {};
+  const updatedIds = [];
+  const missingIds = [];
   for (const sid of studentIds) {
     const existing = await env.DB.prepare("SELECT status FROM students WHERE student_id = ?")
       .bind(sid).first();
+    if (!existing) {
+      missingIds.push(sid);
+      continue;
+    }
     previousStatus[sid] = String(existing?.status || "Active");
     await env.DB.prepare("UPDATE students SET status = 'Alumni' WHERE student_id = ?")
       .bind(sid).run();
+    updatedIds.push(sid);
   }
   await writeActivity(
     env,
     session,
     "students_marked_alumni",
-    `Marked ${studentIds.length} student(s) as alumni`,
-    { student_ids: studentIds, previous_status: previousStatus }
+    `Marked ${updatedIds.length} student(s) as alumni`,
+    { student_ids: updatedIds, previous_status: previousStatus, missing_ids: missingIds }
   );
-  return json({ status: "ok", updated: studentIds.length });
+  return json({ status: "ok", updated: updatedIds.length, updated_ids: updatedIds, missing_ids: missingIds });
 }
 
 async function studentsDelete(request, session, env) {

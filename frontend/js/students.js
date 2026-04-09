@@ -212,6 +212,10 @@ export async function bulkMarkAlumni() {
     errorMessage: "Failed to mark alumni.",
   });
   if (!res.ok) return;
+  const data = await res.json().catch(() => ({}));
+  if (Array.isArray(data.missing_ids) && data.missing_ids.length) {
+    alert(`Missing student IDs: ${data.missing_ids.join(", ")}`);
+  }
   state.selectedStudentIds.clear();
   updateSelectedCount();
   await Promise.all([loadStudents(), window.loadProudAlumni ? window.loadProudAlumni() : null]);
@@ -249,6 +253,10 @@ export async function markSingleAlumni(studentId) {
     errorMessage: "Failed to mark alumni.",
   });
   if (!res.ok) return;
+  const data = await res.json().catch(() => ({}));
+  if (Array.isArray(data.missing_ids) && data.missing_ids.length) {
+    alert(`Missing student IDs: ${data.missing_ids.join(", ")}`);
+  }
   state.selectedStudentIds.delete(studentId);
   await Promise.all([loadStudents(), window.loadProudAlumni ? window.loadProudAlumni() : null]);
 }

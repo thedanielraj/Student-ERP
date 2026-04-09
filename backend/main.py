@@ -1261,19 +1261,25 @@ def students_mark_alumni(payload: StudentIdsRequest, request: Request):
         raise HTTPException(status_code=400, detail="Invalid payload")
     conn = get_connection()
     previous_status = {}
+    updated_ids = []
+    missing_ids = []
     for sid in student_ids:
         row = conn.execute("SELECT status FROM students WHERE student_id = ?", (sid,)).fetchone()
+        if not row:
+            missing_ids.append(sid)
+            continue
         previous_status[sid] = str((row["status"] if row else "Active") or "Active")
         conn.execute("UPDATE students SET status = 'Alumni' WHERE student_id = ?", (sid,))
+        updated_ids.append(sid)
     conn.commit()
     conn.close()
     _log_activity(
         user,
         "students_marked_alumni",
-        f"Marked {len(student_ids)} student(s) as alumni",
-        {"student_ids": student_ids, "previous_status": previous_status},
+        f"Marked {len(updated_ids)} student(s) as alumni",
+        {"student_ids": updated_ids, "previous_status": previous_status, "missing_ids": missing_ids},
     )
-    return {"status": "ok", "updated": len(student_ids)}
+    return {"status": "ok", "updated": len(updated_ids), "updated_ids": updated_ids, "missing_ids": missing_ids}
 
 
 @app.post("/students/delete")
