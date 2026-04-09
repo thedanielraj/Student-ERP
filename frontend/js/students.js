@@ -6,6 +6,10 @@ import { formatMoney, formatDateDDMMYYYY } from "./utils.js";
 let studentsLoadingPromise = null;
 let studentRenderToken = 0;
 
+function isAlumni(student) {
+  return String(student?.status || "").trim().toLowerCase() === "alumni";
+}
+
 function bindStudentListHandlers() {
   const list = document.getElementById("studentList");
   if (!list || list.dataset.bound === "1") return;
@@ -103,12 +107,20 @@ export function renderStudentList() {
   }
   const list = document.getElementById("studentList");
   const searchInput = document.getElementById("search");
+  const showAlumniToggle = document.getElementById("showAlumniToggle");
   if (!list || !searchInput) return;
   bindStudentListHandlers();
+  if (showAlumniToggle && showAlumniToggle.dataset.bound !== "1") {
+    showAlumniToggle.dataset.bound = "1";
+    showAlumniToggle.addEventListener("change", () => renderStudentList());
+  }
   const search = searchInput.value.trim().toLowerCase();
   list.innerHTML = "";
 
   const filtered = state.allStudents.filter((s) => {
+    if (!showAlumniToggle?.checked && isAlumni(s)) {
+      return false;
+    }
     const key = `${s.student_name} ${s.student_id}`.toLowerCase();
     return key.includes(search);
   }).sort((a, b) => {
@@ -216,10 +228,18 @@ export async function bulkMarkAlumni() {
   if (Array.isArray(data.missing_ids) && data.missing_ids.length) {
     alert(`Missing student IDs: ${data.missing_ids.join(", ")}`);
   }
+  const updated = Number(data.updated || 0);
+  if (!updated) {
+    alert("No students were marked as alumni.");
+  } else if (updated < ids.length) {
+    alert(`Marked ${updated} of ${ids.length} selected students as alumni.`);
+  }
   state.selectedStudentIds.clear();
   updateSelectedCount();
   await Promise.all([loadStudents(), window.loadProudAlumni ? window.loadProudAlumni() : null]);
-  alert("Marked as alumni.");
+  if (updated) {
+    alert("Marked as alumni.");
+  }
 }
 
 export async function bulkDeleteStudents() {
@@ -256,6 +276,10 @@ export async function markSingleAlumni(studentId) {
   const data = await res.json().catch(() => ({}));
   if (Array.isArray(data.missing_ids) && data.missing_ids.length) {
     alert(`Missing student IDs: ${data.missing_ids.join(", ")}`);
+  }
+  const updated = Number(data.updated || 0);
+  if (!updated) {
+    alert("Student was not marked as alumni.");
   }
   state.selectedStudentIds.delete(studentId);
   await Promise.all([loadStudents(), window.loadProudAlumni ? window.loadProudAlumni() : null]);
