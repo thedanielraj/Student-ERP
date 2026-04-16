@@ -2,6 +2,11 @@ const COURSE_FEES_INR = {
   "ground operations": 150000,
   "cabin crew": 250000,
 };
+const DEFAULT_TRAINING_CATEGORIES = [
+  "Ground Operations",
+  "Cabin Crew",
+  "CPL Ground Classes",
+];
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -126,6 +131,8 @@ export async function onRequest(context) {
     if (path === "fees/summary" && method === "GET") return feesSummary(session, env);
     if (path === "fees/record" && method === "POST") return feesRecord(request, session, env);
     if (path === "fees/reminders" && method === "POST") return feesReminders(request, session, env);
+    if (path === "fees/admin/categories" && method === "GET") return feesCategoriesList(session, env);
+    if (path === "fees/admin/category" && method === "POST") return feesCategoryUpsert(request, session, env);
     if (path === "fees/admin/policies" && method === "GET") return feesPoliciesList(session, env);
     if (path === "fees/admin/policy" && method === "POST") return feesPolicyUpsert(request, session, env);
     if (path === "fees/admin/reset-unpaid" && method === "POST") return feesResetUnpaid(session, env);
@@ -232,6 +239,10 @@ function random8Digits() {
   let s = "";
   for (let i = 0; i < 8; i++) s += Math.floor(Math.random() * 10);
   return s;
+}
+
+function normalizeTrainingCategory(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 async function ensureStudentPasswordsTable(env) {
@@ -1289,6 +1300,7 @@ async function admissionsDelete(admissionId, session, env) {
 
 async function studentFinancials(env, studentId) {
   await ensureFeePoliciesTable(env);
+  await ensureTrainingCategoriesTable(env);
   const student = await env.DB.prepare(
     "SELECT student_id, student_name, course, batch FROM students WHERE student_id = ?"
   ).bind(studentId).first();
@@ -1299,7 +1311,7 @@ async function studentFinancials(env, studentId) {
   const policy = await env.DB.prepare(
     "SELECT concession_amount, due_date FROM fee_policies WHERE student_id = ?"
   ).bind(studentId).first();
-  const planned = COURSE_FEES_INR[String(student.course || "").toLowerCase()];
+  const planned = await courseFeeInr(env, student.course);
   const baseTotal = Number(planned ?? fee.max_total ?? 0);
   const concessionAmount = Math.min(Math.max(Number(policy?.concession_amount || 0), 0), Math.max(baseTotal, 0));
   const total = Math.max(baseTotal - concessionAmount, 0);
@@ -1326,6 +1338,73 @@ async function ensureFeePoliciesTable(env) {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`
   ).run();
+}
+
+async function ensureTrainingCategoriesTable(env) {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS training_categories (
+      category_key TEXT PRIMARY KEY,
+      category_name TEXT NOT NULL,
+      fee_amount REAL NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`
+  ).run();
+}
+
+async function listTrainingCategories(env) {
+  await ensureTrainingCategoriesTable(env);
+  const rows = await env.DB.prepare(
+    "SELECT category_key, category_name, fee_amount, updated_at FROM training_categories ORDER BY category_name ASC"
+  ).all();
+  const byKey = new Map((rows.results || []).map((row) => [String(row.category_key || ""), row]));
+  const students = await env.DB.prepare(
+    "SELECT DISTINCT course FROM students WHERE TRIM(COALESCE(course, '')) <> ''"
+  ).all();
+  const categories = [];
+  const seen = new Set();
+  const candidateNames = [
+    ...DEFAULT_TRAINING_CATEGORIES,
+    ...(students.results || []).map((row) => String(row.course || "").trim()),
+  ];
+  for (const name of candidateNames) {
+    const categoryName = String(name || "").trim();
+    if (!categoryName) continue;
+    const key = normalizeTrainingCategory(categoryName);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const stored = byKey.get(key);
+    const defaultFee = COURSE_FEES_INR[key];
+    categories.push({
+      category_key: key,
+      category_name: stored?.category_name || categoryName,
+      fee_amount: Number(stored?.fee_amount ?? defaultFee ?? 0),
+      updated_at: stored?.updated_at || null,
+      is_custom: Boolean(stored),
+    });
+  }
+  for (const [key, stored] of byKey.entries()) {
+    if (seen.has(key)) continue;
+    categories.push({
+      category_key: key,
+      category_name: String(stored.category_name || "").trim() || key,
+      fee_amount: Number(stored.fee_amount || 0),
+      updated_at: stored.updated_at || null,
+      is_custom: true,
+    });
+  }
+  categories.sort((a, b) => String(a.category_name || "").localeCompare(String(b.category_name || "")));
+  return categories;
+}
+
+async function courseFeeInr(env, course) {
+  const key = normalizeTrainingCategory(course);
+  if (!key) return null;
+  await ensureTrainingCategoriesTable(env);
+  const row = await env.DB.prepare(
+    "SELECT fee_amount FROM training_categories WHERE category_key = ?"
+  ).bind(key).first();
+  if (row) return Number(row.fee_amount || 0);
+  return COURSE_FEES_INR[key] ?? null;
 }
 
 async function ensureFeeReceiptColumns(env) {
@@ -2595,6 +2674,45 @@ async function feesPoliciesList(session, env) {
   return json(rows.results || []);
 }
 
+async function feesCategoriesList(session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  return json(await listTrainingCategories(env));
+}
+
+async function feesCategoryUpsert(request, session, env) {
+  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  await ensureTrainingCategoriesTable(env);
+  const b = await request.json().catch(() => ({}));
+  const categoryName = String(b.category_name || "").trim();
+  if (!categoryName) throw httpError(400, "category_name is required");
+  const feeAmount = Math.max(Number(b.fee_amount || 0), 0);
+  const categoryKey = normalizeTrainingCategory(categoryName);
+  await env.DB.prepare(
+    `INSERT INTO training_categories (category_key, category_name, fee_amount, updated_at)
+     VALUES (?, ?, ?, datetime('now'))
+     ON CONFLICT(category_key) DO UPDATE SET
+       category_name = excluded.category_name,
+       fee_amount = excluded.fee_amount,
+       updated_at = datetime('now')`
+  ).bind(categoryKey, categoryName, feeAmount).run();
+  const row = await env.DB.prepare(
+    "SELECT category_key, category_name, fee_amount, updated_at FROM training_categories WHERE category_key = ?"
+  ).bind(categoryKey).first();
+  await writeActivity(
+    env,
+    session,
+    "training_category_fee_updated",
+    `Updated training category fee for ${categoryName}`,
+    { category_key: categoryKey, category_name: categoryName, fee_amount: feeAmount }
+  );
+  return json(row || {
+    category_key: categoryKey,
+    category_name: categoryName,
+    fee_amount: feeAmount,
+    updated_at: null,
+  });
+}
+
 async function feesPolicyUpsert(request, session, env) {
   if (!isSuperuser(session)) throw httpError(403, "Forbidden");
   await ensureFeePoliciesTable(env);
@@ -2652,7 +2770,7 @@ async function feesResetUnpaid(session, env) {
   let inserted = 0;
   for (const s of students.results || []) {
     const sid = String(s.student_id || "");
-    const planned = COURSE_FEES_INR[String(s.course || "").toLowerCase()];
+    const planned = await courseFeeInr(env, s.course);
     const baseTotal = Number(planned ?? maxByStudent.get(sid) ?? 0);
     const policy = policyByStudent.get(sid);
     const concession = Math.min(Math.max(Number(policy?.concession_amount || 0), 0), Math.max(baseTotal, 0));

@@ -9,6 +9,37 @@ import {
   setText
 } from "./utils.js";
 
+function normalizeTrainingCategory(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function getTrainingCategoryFee(course, student = null) {
+  const key = normalizeTrainingCategory(course);
+  const configured = Number(state.trainingCategoryFees[key]);
+  if (Number.isFinite(configured)) return configured;
+  if (student) {
+    const concession = Number(student.fee_concession || 0);
+    const currentTotal = Number(student.fee_total || 0);
+    if (Number.isFinite(currentTotal) && currentTotal > 0) {
+      return Math.max(currentTotal + concession, 0);
+    }
+  }
+  return 0;
+}
+
+export function switchFeesAdminTab(tab) {
+  if (state.authInfo && state.authInfo.role === "student") return;
+  state.feesAdminTab = tab === "categories" ? "categories" : "records";
+  const recordsBtn = document.getElementById("feesAdminTabRecords");
+  const categoriesBtn = document.getElementById("feesAdminTabCategories");
+  const recordsPanel = document.getElementById("feesAdminRecordsPanel");
+  const categoriesPanel = document.getElementById("feesAdminCategoriesPanel");
+  recordsBtn?.classList.toggle("active", state.feesAdminTab === "records");
+  categoriesBtn?.classList.toggle("active", state.feesAdminTab === "categories");
+  recordsPanel?.classList.toggle("hidden", state.feesAdminTab !== "records");
+  categoriesPanel?.classList.toggle("hidden", state.feesAdminTab !== "categories");
+}
+
 export async function loadRecentFees() {
   const body = document.getElementById("recentFeesBody");
   if (!body) return;
@@ -33,6 +64,21 @@ export async function loadRecentFees() {
     `;
     body.appendChild(tr);
   });
+}
+
+export async function refreshFeesDashboard() {
+  if (state.authInfo && state.authInfo.role === "student") {
+    await Promise.all([loadFeeSummary(), loadStudentFeeSummary()]);
+    return;
+  }
+  await Promise.all([
+    window.loadStudents ? window.loadStudents() : null,
+    loadTrainingCategoryFees(),
+    loadFeePolicies(),
+    loadFeeSummary(),
+    loadRecentFees(),
+  ]);
+  switchFeesAdminTab(state.feesAdminTab || "records");
 }
 
 export async function loadFees(studentId) {
@@ -68,17 +114,18 @@ export function renderFeesEntryList() {
   body.innerHTML = "";
 
   if (!state.allStudents.length) {
-    body.innerHTML = `<tr><td colspan="14" class="empty">No students found</td></tr>`;
+    body.innerHTML = `<tr><td colspan="15" class="empty">No students found</td></tr>`;
     return;
   }
 
   state.allStudents.forEach(s => {
     const policy = state.feePoliciesByStudent[String(s.student_id)] || {};
-    const totalAmount = 150000;
-    const totalDisplay = "INR 1.5L";
+    const totalAmount = getTrainingCategoryFee(s.course, s);
+    const totalDisplay = `INR ${formatMoney(totalAmount)}`;
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${s.student_name} (ID: ${s.student_id})</td>
+      <td>${s.course || "-"}</td>
       <td>${s.batch}</td>
       <td>
         <span class="fee-total-label">${totalDisplay}</span>
@@ -242,6 +289,71 @@ export async function loadFeePolicies() {
   });
   state.feePoliciesByStudent = map;
   renderFeesEntryList();
+}
+
+export async function loadTrainingCategoryFees() {
+  if (!state.authInfo || state.authInfo.role === "student") return;
+  const res = await authFetch(`${API}/fees/admin/categories`);
+  if (!res.ok) return;
+  const rows = await res.json().catch(() => []);
+  const map = {};
+  (rows || []).forEach((row) => {
+    const key = normalizeTrainingCategory(row.category_name || row.category_key || "");
+    if (!key) return;
+    map[key] = Number(row.fee_amount || 0);
+  });
+  state.trainingCategoryFees = map;
+  renderTrainingCategoryFees(rows || []);
+  renderFeesEntryList();
+}
+
+export function renderTrainingCategoryFees(rows = []) {
+  const body = document.getElementById("trainingCategoryFeeBody");
+  if (!body) return;
+  body.innerHTML = "";
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="4" class="empty">No training categories found</td></tr>`;
+    return;
+  }
+  rows.forEach((row) => {
+    const categoryName = String(row.category_name || row.category_key || "").trim();
+    const updated = row.updated_at ? formatDateDDMMYYYY(String(row.updated_at).slice(0, 10)) : "Default";
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${categoryName}</td>
+      <td><input class="fee-input" id="training-fee-${row.category_key}" type="number" min="0" step="0.01" value="${Number(row.fee_amount || 0)}" /></td>
+      <td>${updated}</td>
+      <td><button class="btn" data-action="save-category" data-key="${row.category_key}">Save</button></td>
+    `;
+    tr.querySelector('[data-action="save-category"]')?.addEventListener("click", () => {
+      saveTrainingCategoryFee(row.category_key, categoryName);
+    });
+    body.appendChild(tr);
+  });
+}
+
+export async function saveTrainingCategoryFee(categoryKey, categoryName) {
+  const input = document.getElementById(`training-fee-${categoryKey}`);
+  const feeAmount = Math.max(Number(input?.value || 0), 0);
+  const res = await authFetch(`${API}/fees/admin/category`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      category_name: categoryName,
+      fee_amount: feeAmount,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "Failed to update training category fee.");
+    return;
+  }
+  await Promise.all([
+    loadTrainingCategoryFees(),
+    loadFeeSummary(),
+    window.loadStudents ? window.loadStudents() : null,
+  ]);
+  alert("Training category fee updated.");
 }
 
 export async function loadFeeSummary() {
@@ -428,17 +540,18 @@ export function exportFeesCsv() {
     alert("No fee data to export.");
     return;
   }
-  const headers = ["Student", "Batch", "Total Fee", "Paid", "Remarks", "Concession", "Deadline"];
+  const headers = ["Student", "Course", "Batch", "Total Fee", "Paid", "Remarks", "Concession", "Deadline"];
   const data = rows.map((row) => {
     const cells = Array.from(row.children);
     const student = String(cells[0]?.textContent || "").trim();
-    const batch = String(cells[1]?.textContent || "").trim();
-    const total = "150000";
-    const paid = String(cells[3]?.querySelector("input")?.value || "").trim();
-    const remarks = String(cells[5]?.querySelector("input")?.value || "").trim();
-    const concession = String(cells[6]?.querySelector("input")?.value || "").trim();
-    const deadline = String(cells[7]?.querySelector("input")?.value || "").trim();
-    return [student, batch, total, paid, remarks, concession, deadline];
+    const course = String(cells[1]?.textContent || "").trim();
+    const batch = String(cells[2]?.textContent || "").trim();
+    const total = String(cells[3]?.querySelector("input")?.value || "").trim();
+    const paid = String(cells[4]?.querySelector("input")?.value || "").trim();
+    const remarks = String(cells[6]?.querySelector("input")?.value || "").trim();
+    const concession = String(cells[12]?.querySelector("input")?.value || "").trim();
+    const deadline = String(cells[13]?.querySelector("input")?.value || "").trim();
+    return [student, course, batch, total, paid, remarks, concession, deadline];
   });
   downloadCsv(headers, data, `fees_${getTodayIso()}.csv`);
 }

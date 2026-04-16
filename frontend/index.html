@@ -636,16 +636,16 @@
 
       <section id="section-fees" class="section hidden">
         <header class="topbar">
-          <div>
-            <h1 id="feesTitle">Fees Overview</h1>
-            <p id="feesSubtitle">Record fees paid for each student</p>
-          </div>
-          <div class="top-actions">
-            <button id="feesRefreshBtn" class="btn" onclick="renderFeesEntryList()">Refresh</button>
-            <button class="btn" onclick="exportFeesCsv()">Export CSV</button>
-            <button class="btn" onclick="sendFeeReminders()">Send Fee Reminders</button>
-          </div>
-        </header>
+            <div>
+              <h1 id="feesTitle">Fees Overview</h1>
+              <p id="feesSubtitle">Record fees paid for each student</p>
+            </div>
+            <div class="top-actions">
+              <button id="feesRefreshBtn" class="btn" onclick="refreshFeesDashboard()">Refresh</button>
+              <button class="btn" onclick="exportFeesCsv()">Export CSV</button>
+              <button class="btn" onclick="sendFeeReminders()">Send Fee Reminders</button>
+            </div>
+          </header>
         <section id="studentFeePanel" class="panel hidden">
           <div class="panel-header">
             <h2>Pay Remaining Fees</h2>
@@ -712,35 +712,67 @@
         </section>
         <section id="adminFeesPanel" class="panel">
           <div class="panel-header">
-            <h2>Record Fees</h2>
-            <span class="hint">Upload a receipt with each payment</span>
-            <button class="btn" onclick="resetFeesToUnpaid()">Reset All to 100% Unpaid</button>
+            <h2>Staff Fee Controls</h2>
+            <span class="hint">Only visible to staff</span>
           </div>
-          <table>
-            <thead>
-              <tr>
-                <th>Student</th>
-                <th>Batch</th>
-                <th>Total Fee</th>
-                <th>Paid</th>
-                <th>Receipt</th>
-                <th>Remarks</th>
-                <th>Pay Mode</th>
-                <th>Bank Name</th>
-                <th>Txn / UTR</th>
-                <th>Bank Ref</th>
-                <th>Txn Type</th>
-                <th>Concession</th>
-                <th>Deadline</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="feeEntryBody">
-              <tr>
-                <td colspan="14" class="empty">No students loaded</td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="fees-admin-tabs">
+            <button id="feesAdminTabRecords" class="btn active" onclick="switchFeesAdminTab('records')">Student Fees</button>
+            <button id="feesAdminTabCategories" class="btn" onclick="switchFeesAdminTab('categories')">Training Categories</button>
+          </div>
+          <div id="feesAdminRecordsPanel">
+            <div class="panel-header">
+              <h2>Record Fees</h2>
+              <span class="hint">Upload a receipt with each payment</span>
+              <button class="btn" onclick="resetFeesToUnpaid()">Reset All to 100% Unpaid</button>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Student</th>
+                  <th>Course</th>
+                  <th>Batch</th>
+                  <th>Total Fee</th>
+                  <th>Paid</th>
+                  <th>Receipt</th>
+                  <th>Remarks</th>
+                  <th>Pay Mode</th>
+                  <th>Bank Name</th>
+                  <th>Txn / UTR</th>
+                  <th>Bank Ref</th>
+                  <th>Txn Type</th>
+                  <th>Concession</th>
+                  <th>Deadline</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="feeEntryBody">
+                <tr>
+                  <td colspan="15" class="empty">No students loaded</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div id="feesAdminCategoriesPanel" class="hidden">
+            <div class="panel-header">
+              <h2>Training Category Fees</h2>
+              <span class="hint">Changes apply to fee summaries and future records</span>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Training Category</th>
+                  <th>Fee Amount</th>
+                  <th>Updated</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="trainingCategoryFeeBody">
+                <tr>
+                  <td colspan="4" class="empty">No training categories found</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </section>
         <section id="accountSecurityPanel" class="panel">
           <div class="panel-header">

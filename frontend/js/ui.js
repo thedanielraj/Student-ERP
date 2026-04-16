@@ -145,9 +145,7 @@ export function switchSection(target) {
       if (window.loadAttendanceCalendar) window.loadAttendanceCalendar();
     },
     fees: () => {
-      if (window.loadFeePolicies) window.loadFeePolicies();
-      if (window.renderFeesEntryList) window.renderFeesEntryList();
-      if (window.loadFeeSummary) window.loadFeeSummary();
+      if (window.refreshFeesDashboard) window.refreshFeesDashboard();
     },
     tests: () => { if (window.loadTests) window.loadTests(); },
     feed: () => { if (window.loadFeed) window.loadFeed(); },
@@ -345,9 +343,13 @@ export function applyRoleUI() {
     if (attendanceSubtitle) attendanceSubtitle.textContent = "Your recent attendance records";
   } else {
     if (feesTitle) feesTitle.textContent = "Fees Overview";
-    if (feesSubtitle) feesSubtitle.textContent = "Record fees paid for each student";
+    if (feesSubtitle) feesSubtitle.textContent = "Manage student fee records and training category pricing";
     if (feesRefresh) feesRefresh.classList.remove("hidden");
     if (attendanceTitle) attendanceTitle.textContent = "Attendance Overview";
     if (attendanceSubtitle) attendanceSubtitle.textContent = "Date-wise attendance across all students";
+  }
+
+  if (!isStudent && window.switchFeesAdminTab) {
+    window.switchFeesAdminTab(state.feesAdminTab || "records");
   }
 }

@@ -47,6 +47,11 @@ COURSE_FEES_INR = {
     "ground operations": 150000.0,
     "cabin crew": 250000.0,
 }
+DEFAULT_TRAINING_CATEGORIES = [
+    "Ground Operations",
+    "Cabin Crew",
+    "CPL Ground Classes",
+]
 
 
 def _load_local_env_file(path: Path):
@@ -177,6 +182,11 @@ class FeePolicyUpdateRequest(BaseModel):
     student_id: str
     concession_amount: Optional[float] = 0
     due_date: Optional[str] = None
+
+
+class TrainingCategoryFeeRequest(BaseModel):
+    category_name: str
+    fee_amount: float
 
 
 class ChangePasswordRequest(BaseModel):
@@ -325,6 +335,70 @@ def _ensure_fee_policies_table():
     )
     conn.commit()
     conn.close()
+
+
+def _normalize_training_category(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip()).lower()
+
+
+def _ensure_training_categories_table():
+    conn = get_connection()
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS training_categories (
+            category_key TEXT PRIMARY KEY,
+            category_name TEXT NOT NULL,
+            fee_amount REAL NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+def _list_training_categories(conn):
+    _ensure_training_categories_table()
+    rows = conn.execute(
+        "SELECT category_key, category_name, fee_amount, updated_at FROM training_categories ORDER BY category_name ASC"
+    ).fetchall()
+    by_key = {str(row["category_key"]): dict(row) for row in rows}
+    categories = []
+    seen = set()
+    candidate_names = list(DEFAULT_TRAINING_CATEGORIES)
+    candidate_names.extend(
+        str(row["course"] or "").strip()
+        for row in conn.execute("SELECT DISTINCT course FROM students WHERE TRIM(COALESCE(course, '')) <> ''").fetchall()
+    )
+    for name in candidate_names:
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            continue
+        key = _normalize_training_category(clean_name)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        stored = by_key.get(key)
+        default_fee = COURSE_FEES_INR.get(key)
+        categories.append({
+            "category_key": key,
+            "category_name": stored["category_name"] if stored else clean_name,
+            "fee_amount": float(stored["fee_amount"]) if stored else (float(default_fee) if default_fee is not None else 0.0),
+            "updated_at": stored["updated_at"] if stored else None,
+            "is_custom": bool(stored),
+        })
+    for key, stored in by_key.items():
+        if key in seen:
+            continue
+        categories.append({
+            "category_key": key,
+            "category_name": str(stored["category_name"] or "").strip() or key.title(),
+            "fee_amount": float(stored["fee_amount"]),
+            "updated_at": stored["updated_at"],
+            "is_custom": True,
+        })
+    categories.sort(key=lambda item: str(item["category_name"]).lower())
+    return categories
 
 
 def _ensure_fee_receipt_columns(conn):
@@ -547,10 +621,19 @@ def _extract_airline_from_interview_remark(remark: str) -> str:
     return "Interview"
 
 
-def _course_fee_inr(course: str) -> Optional[float]:
+def _course_fee_inr(course: str, conn=None) -> Optional[float]:
     if not course:
         return None
-    return COURSE_FEES_INR.get(str(course).strip().lower())
+    key = _normalize_training_category(course)
+    if conn is not None:
+        _ensure_training_categories_table()
+        row = conn.execute(
+            "SELECT fee_amount FROM training_categories WHERE category_key = ?",
+            (key,),
+        ).fetchone()
+        if row:
+            return float(row["fee_amount"])
+    return COURSE_FEES_INR.get(key)
 
 
 def _student_financials(conn, student_id: str):
@@ -579,7 +662,7 @@ def _student_financials(conn, student_id: str):
         (student_id,),
     ).fetchone()
 
-    planned = _course_fee_inr(student["course"])
+    planned = _course_fee_inr(student["course"], conn)
     base_total = float(planned if planned is not None else fee["max_total"])
     concession_amount = min(
         max(float((policy["concession_amount"] if policy else 0) or 0), 0.0),
@@ -2284,6 +2367,53 @@ def fees_admin_policies(request: Request):
     return [dict(r) for r in rows]
 
 
+@app.get("/fees/admin/categories")
+def fees_admin_categories(request: Request):
+    user = _get_current_user(request)
+    _require_superuser(user)
+    conn = get_connection()
+    rows = _list_training_categories(conn)
+    conn.close()
+    return rows
+
+
+@app.post("/fees/admin/category")
+def fees_admin_category(payload: TrainingCategoryFeeRequest, request: Request):
+    user = _get_current_user(request)
+    _require_superuser(user)
+    category_name = str(payload.category_name or "").strip()
+    if not category_name:
+        raise HTTPException(status_code=400, detail="category_name is required")
+    fee_amount = max(float(payload.fee_amount or 0), 0.0)
+    category_key = _normalize_training_category(category_name)
+    conn = get_connection()
+    _ensure_training_categories_table()
+    conn.execute(
+        """
+        INSERT INTO training_categories (category_key, category_name, fee_amount, updated_at)
+        VALUES (?, ?, ?, datetime('now'))
+        ON CONFLICT(category_key) DO UPDATE SET
+          category_name = excluded.category_name,
+          fee_amount = excluded.fee_amount,
+          updated_at = datetime('now')
+        """,
+        (category_key, category_name, fee_amount),
+    )
+    row = conn.execute(
+        "SELECT category_key, category_name, fee_amount, updated_at FROM training_categories WHERE category_key = ?",
+        (category_key,),
+    ).fetchone()
+    conn.commit()
+    conn.close()
+    _log_activity(
+        user,
+        "training_category_fee_updated",
+        f"Updated training category fee for {category_name}",
+        {"category_key": category_key, "category_name": category_name, "fee_amount": fee_amount},
+    )
+    return dict(row)
+
+
 @app.post("/fees/admin/policy")
 def fees_admin_policy(payload: FeePolicyUpdateRequest, request: Request):
     user = _get_current_user(request)
@@ -2386,7 +2516,7 @@ def fees_admin_reset_unpaid(request: Request):
     inserted = 0
     for row in students:
         sid = str(row["student_id"])
-        planned = _course_fee_inr(row["course"])
+        planned = _course_fee_inr(row["course"], conn)
         base_total = float(planned if planned is not None else existing_by_sid.get(sid, 0.0))
         policy = policy_by_sid.get(sid) or {}
         concession = min(max(float(policy.get("concession_amount", 0) or 0), 0.0), max(base_total, 0.0))

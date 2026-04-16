@@ -9,6 +9,8 @@ export const state = {
   portalMode: "student",
   alumniSelectedIds: new Set(),
   selectedStudentIds: new Set(),
+  trainingCategoryFees: {},
+  feesAdminTab: "records",
   announcementPollTimer: null,
   latestAnnouncementIdSeen: Number(localStorage.getItem("latestAnnouncementIdSeen") || 0),
   announcementsNotifierBootstrapped: false,
