@@ -18,7 +18,7 @@ function getTrainingCategoryFee(course, student = null) {
   const configured = Number(state.trainingCategoryFees[key]);
   if (Number.isFinite(configured)) return configured;
   if (student) {
-    const concession = Number(student.fee_concession || 0);
+    const concession = Number(student.fee_concession || student.discount_amount || 0);
     const currentTotal = Number(student.fee_total || 0);
     if (Number.isFinite(currentTotal) && currentTotal > 0) {
       return Math.max(currentTotal + concession, 0);
@@ -145,7 +145,7 @@ export function renderFeesEntryList() {
       <td><input class="fee-input" id="fee-utr-${s.student_id}" placeholder="Txn / UTR" /></td>
       <td><input class="fee-input" id="fee-bankref-${s.student_id}" placeholder="Bank Ref" /></td>
       <td><input class="fee-input" id="fee-txtype-${s.student_id}" placeholder="Txn Type" /></td>
-      <td><input class="fee-input" id="fee-concession-${s.student_id}" type="number" min="0" step="0.01" placeholder="Concession" value="${Number(policy.concession_amount || 0)}" /></td>
+      <td><input class="fee-input" id="fee-concession-${s.student_id}" type="number" min="0" step="0.01" placeholder="Discount" value="${Number(policy.concession_amount || policy.discount_amount || 0)}" /></td>
       <td><input id="fee-deadline-${s.student_id}" type="date" value="${policy.due_date || ""}" /></td>
       <td>
         <button class="btn" data-action="record" data-id="${s.student_id}">Record</button>
@@ -237,6 +237,7 @@ export async function saveFeePolicy(studentId) {
     body: JSON.stringify({
       student_id: String(studentId),
       concession_amount: concession,
+      discount_amount: concession,
       due_date: dueDate || null,
     }),
   });
@@ -247,11 +248,12 @@ export async function saveFeePolicy(studentId) {
   }
   const data = await res.json().catch(() => ({}));
   state.feePoliciesByStudent[String(studentId)] = {
-    concession_amount: Number(data.concession_amount || concession),
+    concession_amount: Number(data.concession_amount || data.discount_amount || concession),
+    discount_amount: Number(data.discount_amount || data.concession_amount || concession),
     due_date: data.due_date || dueDate || "",
   };
   await Promise.all([loadFeeSummary(), window.loadStudentFeeSummary ? window.loadStudentFeeSummary() : null]);
-  alert("Fee concession/deadline updated.");
+  alert("Fee discount/deadline updated.");
 }
 
 export async function resetFeesToUnpaid() {
@@ -283,7 +285,8 @@ export async function loadFeePolicies() {
     const sid = String(r.student_id || "");
     if (!sid) return;
     map[sid] = {
-      concession_amount: Number(r.concession_amount || 0),
+      concession_amount: Number(r.concession_amount || r.discount_amount || 0),
+      discount_amount: Number(r.discount_amount || r.concession_amount || 0),
       due_date: r.due_date || "",
     };
   });
@@ -410,7 +413,7 @@ export async function loadStudentFeeSummary() {
   setText("studentFeeCourse", data.course || "-");
   setText("studentFeeTotal", formatMoney(data.total));
   setText("studentFeePaid", formatMoney(data.paid));
-  setText("studentFeeConcession", formatMoney(data.concession_amount || 0));
+  setText("studentFeeConcession", formatMoney(data.discount_amount || data.concession_amount || 0));
   setText("studentFeeDeadline", data.due_date ? formatDateDDMMYYYY(data.due_date) : "-");
   const installmentEl = document.getElementById("studentInstallmentAmount");
   if (installmentEl && !installmentEl.value) {
@@ -540,7 +543,7 @@ export function exportFeesCsv() {
     alert("No fee data to export.");
     return;
   }
-  const headers = ["Student", "Course", "Batch", "Total Fee", "Paid", "Remarks", "Concession", "Deadline"];
+  const headers = ["Student", "Course", "Batch", "Total Fee", "Paid", "Remarks", "Discount", "Deadline"];
   const data = rows.map((row) => {
     const cells = Array.from(row.children);
     const student = String(cells[0]?.textContent || "").trim();

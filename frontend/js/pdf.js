@@ -470,7 +470,7 @@ export async function downloadInvoicePdf(invoice) {
 
     const tableTop = infoY2 - 26;
     const colWidths = [35, 190, 75, 70, 95, 46];
-    const headers = ["No", "Description", "Total Due", "Concession", "Amount Paid (Rs.)", "Balance"];
+    const headers = ["No", "Description", "Total Due", "Discount", "Amount Paid (Rs.)", "Balance"];
     const rowHeight = 26;
     const totalTableHeight = rowHeight * 3;
 

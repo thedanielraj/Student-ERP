@@ -181,6 +181,7 @@ class RazorpayVerifyRequest(BaseModel):
 class FeePolicyUpdateRequest(BaseModel):
     student_id: str
     concession_amount: Optional[float] = 0
+    discount_amount: Optional[float] = None
     due_date: Optional[str] = None
 
 
@@ -2428,7 +2429,8 @@ def fees_admin_policy(payload: FeePolicyUpdateRequest, request: Request):
         conn.close()
         raise HTTPException(status_code=404, detail="Student not found")
 
-    concession = max(float(payload.concession_amount or 0), 0.0)
+    raw_discount = payload.discount_amount if payload.discount_amount is not None else payload.concession_amount
+    concession = max(float(raw_discount or 0), 0.0)
     concession = min(concession, max(float(info_before["base_total"]), 0.0))
     due_date = (payload.due_date or "").strip()
     if due_date and not re.match(r"^\d{4}-\d{2}-\d{2}$", due_date):
@@ -2453,12 +2455,14 @@ def fees_admin_policy(payload: FeePolicyUpdateRequest, request: Request):
     _log_activity(user, "fee_policy_updated", f"Updated fee policy for {student_id}", {
         "student_id": student_id,
         "concession_amount": concession,
+        "discount_amount": concession,
         "due_date": due_date,
     })
     return {
         "status": "ok",
         "student_id": student_id,
         "concession_amount": info_after["concession_amount"],
+        "discount_amount": info_after["concession_amount"],
         "due_date": info_after["due_date"],
         "total": info_after["total"],
         "due": info_after["due"],

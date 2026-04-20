@@ -2721,7 +2721,8 @@ async function feesPolicyUpsert(request, session, env) {
   if (!studentId) throw httpError(400, "student_id is required");
   const infoBefore = await studentFinancials(env, studentId);
   if (!infoBefore) throw httpError(404, "Student not found");
-  let concessionAmount = Math.max(Number(b.concession_amount || 0), 0);
+  const rawDiscount = b.discount_amount ?? b.concession_amount ?? 0;
+  let concessionAmount = Math.max(Number(rawDiscount || 0), 0);
   concessionAmount = Math.min(concessionAmount, Math.max(Number(infoBefore.base_total || 0), 0));
   let dueDate = String(b.due_date || "").trim();
   if (dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) throw httpError(400, "due_date must be YYYY-MM-DD");
@@ -2740,12 +2741,13 @@ async function feesPolicyUpsert(request, session, env) {
     session,
     "fee_policy_updated",
     `Updated fee policy for ${studentId}`,
-    { student_id: studentId, concession_amount: concessionAmount, due_date: dueDate }
+    { student_id: studentId, concession_amount: concessionAmount, discount_amount: concessionAmount, due_date: dueDate }
   );
   return json({
     status: "ok",
     student_id: studentId,
     concession_amount: infoAfter?.concession_amount || 0,
+    discount_amount: infoAfter?.concession_amount || 0,
     due_date: infoAfter?.due_date || null,
     total: infoAfter?.total || 0,
     due: infoAfter?.due || 0,
