@@ -35,6 +35,8 @@ function validateAdmissionForm(values) {
     ["Blood group", values.bloodGroup],
     ["Age", values.age],
     ["Date of birth", values.dob],
+    ["Height (cm)", values.heightCm],
+    ["Weight (kg)", values.weightKg],
     ["Aadhaar number", values.aadhaarNumber],
     ["Nationality", values.nationality],
     ["Course", values.course],
@@ -76,6 +78,8 @@ export async function submitAdmissionForm() {
   const bloodGroup = value("admissionBloodGroup");
   const age = Number(value("admissionAge") || 0);
   const dob = value("admissionDob");
+  const heightCm = Number(value("admissionHeightCm") || 0);
+  const weightKg = Number(value("admissionWeightKg") || 0);
   const aadhaarNumber = value("admissionAadhaar");
   const nationality = value("admissionNationality");
   const course = value("admissionCourse");
@@ -106,6 +110,8 @@ export async function submitAdmissionForm() {
     bloodGroup,
     age,
     dob,
+    heightCm,
+    weightKg,
     aadhaarNumber,
     nationality,
     course,
@@ -130,6 +136,8 @@ export async function submitAdmissionForm() {
     blood_group: bloodGroup,
     age,
     dob,
+    height_cm: heightCm,
+    weight_kg: weightKg,
     aadhaar_number: aadhaarNumber,
     nationality,
     father_name: fatherName,
@@ -183,7 +191,7 @@ export async function submitAdmissionForm() {
 
     // Reset form
     ["admissionFirstName", "admissionMiddleName", "admissionLastName", "admissionPhone", "admissionEmail",
-     "admissionBloodGroup", "admissionAge", "admissionDob", "admissionAadhaar", "admissionNationality",
+     "admissionBloodGroup", "admissionAge", "admissionDob", "admissionHeightCm", "admissionWeightKg", "admissionAadhaar", "admissionNationality",
      "admissionCourse", "admissionPhoto", "fatherName", "fatherPhone", "fatherOccupation", "fatherEmail",
      "motherName", "motherPhone", "motherOccupation", "motherEmail", "correspondenceAddress", "permanentAddress"]
     .forEach(id => {
@@ -300,6 +308,8 @@ export async function regenerateAdmissionPdfs() {
       blood_group: r.blood_group || "",
       age: Number(r.age || 0),
       dob: r.dob || "",
+      height_cm: Number(r.height_cm || 0),
+      weight_kg: Number(r.weight_kg || 0),
       aadhaar_number: r.aadhaar_number || "",
       nationality: r.nationality || "",
       course: r.course || "",

@@ -159,6 +159,8 @@
             <option value="Cabin Crew">Cabin Crew</option>
             <option value="CPL Ground Classes">CPL Ground Classes</option>
           </select>
+          <input id="admissionHeightCm" type="number" min="1" step="0.1" placeholder="Height (cm)" required />
+          <input id="admissionWeightKg" type="number" min="1" step="0.1" placeholder="Weight (kg)" required />
         </div>
 
         <div class="panel-header">
@@ -491,6 +493,7 @@
             <input id="name" placeholder="Student Name" />
             <input id="course" list="courseList" placeholder="Course (Ground Ops / Cabin Crew / CPL Ground Classes)" />
             <input id="batch" list="natoBatchList" placeholder="Batch (NATO naming)" />
+            <input id="studentCustomFee" type="number" min="0" step="0.01" placeholder="Custom Total Fee (optional)" />
             <datalist id="natoBatchList"></datalist>
             <datalist id="courseList">
               <option value="Ground Operations"></option>
@@ -737,19 +740,20 @@
                   <th>Remarks</th>
                   <th>Pay Mode</th>
                   <th>Bank Name</th>
-                  <th>Txn / UTR</th>
-                  <th>Bank Ref</th>
-                  <th>Txn Type</th>
+                    <th>Txn / UTR</th>
+                    <th>Bank Ref</th>
+                    <th>Txn Type</th>
+                    <th>Custom Total Fee</th>
                     <th>Discount</th>
-                  <th>Deadline</th>
-                  <th>Actions</th>
+                    <th>Deadline</th>
+                    <th>Actions</th>
                 </tr>
               </thead>
-              <tbody id="feeEntryBody">
-                <tr>
-                  <td colspan="15" class="empty">No students loaded</td>
-                </tr>
-              </tbody>
+                <tbody id="feeEntryBody">
+                  <tr>
+                    <td colspan="16" class="empty">No students loaded</td>
+                  </tr>
+                </tbody>
             </table>
           </div>
           <div id="feesAdminCategoriesPanel" class="hidden">
@@ -787,8 +791,18 @@
         </section>
         <section id="adminPasswordPanel" class="panel">
           <div class="panel-header">
-            <h2>User Password Management</h2>
-            <span class="hint">Staff only</span>
+            <h2>User Management</h2>
+            <span class="hint">Only `superuser` and `nanda`</span>
+          </div>
+          <div class="panel-header">
+            <h2>Create Staff User</h2>
+            <span class="hint">Adds a new staff login</span>
+          </div>
+          <div class="form-row">
+            <input id="staffCreateUsername" placeholder="New staff username" />
+            <input id="staffCreateDisplayName" placeholder="Display name (optional)" />
+            <input id="staffCreatePassword" type="password" placeholder="New staff password" />
+            <button class="btn" onclick="createStaffUser()">Create Staff User</button>
           </div>
           <div class="form-row">
             <input id="adminPasswordUsername" placeholder="Username (e.g., AAI123 / praharsh)" />

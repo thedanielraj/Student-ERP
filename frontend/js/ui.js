@@ -304,6 +304,8 @@ export function applyRoleUI() {
     }
   }
 
+  const canManageStaffUsers = !isStudent && ["superuser", "nanda"].includes(String(state.authInfo?.user || "").toLowerCase());
+
   // Toggle visibility of various panels based on role
   const rolesMap = {
     takeAttendancePanel: !isStudent,
@@ -320,7 +322,7 @@ export function applyRoleUI() {
     adminTestsListPanel: !isStudent,
     testReviewPanel: !isStudent,
     studentTestsPanel: isStudent,
-    adminPasswordPanel: !isStudent,
+    adminPasswordPanel: canManageStaffUsers,
   };
 
   Object.entries(rolesMap).forEach(([id, show]) => {

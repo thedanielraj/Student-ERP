@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS fees (
 CREATE TABLE IF NOT EXISTS fee_policies (
     student_id TEXT PRIMARY KEY,
     concession_amount REAL NOT NULL DEFAULT 0,
+    custom_total_amount REAL,
     due_date TEXT,
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (student_id) REFERENCES students(student_id) ON DELETE CASCADE

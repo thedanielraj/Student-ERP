@@ -137,6 +137,8 @@ export async function generateAdmissionPdfAttachment(payload) {
     y = drawRow(page, "Email", payload.email || "-", y);
     y = drawRow(page, "Date of Birth", payload.dob ? formatDateDDMMYYYY(payload.dob) : "-", y);
     y = drawRow(page, "Age", payload.age || "-", y);
+    y = drawRow(page, "Height (cm)", payload.height_cm || "-", y);
+    y = drawRow(page, "Weight (kg)", payload.weight_kg || "-", y);
     y = drawRow(page, "Blood Group", payload.blood_group || "-", y);
     y = drawRow(page, "Aadhaar", payload.aadhaar_number || "-", y);
     y = drawRow(page, "Nationality", payload.nationality || "-", y);

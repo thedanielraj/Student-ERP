@@ -76,6 +76,7 @@ export async function onRequest(context) {
     const session = await requireAuth(request, env);
     if (path === "auth/change-password" && method === "POST") return authChangePassword(request, session, env);
     if (path === "admin/users/password" && method === "POST") return adminSetUserPassword(request, session, env);
+    if (path === "admin/staff-users" && method === "POST") return adminCreateStaffUser(request, session, env);
 
     if (path === "activity/logs" && method === "GET") return activityLogs(session, env);
     if (path === "activity/undo" && method === "POST") return activityUndo(request, session, env);
@@ -227,6 +228,11 @@ function httpError(status, message) {
 
 function isSuperuser(session) {
   return session?.role === "superuser" || session?.role === "staff" || session?.user_id === "superuser";
+}
+
+function canManageStaffUsers(session) {
+  const userId = String(session?.user_id || "").toLowerCase();
+  return userId === "superuser" || userId === "nanda";
 }
 
 function ensureSelfOrSuperuser(session, studentId) {
@@ -772,7 +778,7 @@ async function authChangePassword(request, session, env) {
 }
 
 async function adminSetUserPassword(request, session, env) {
-  if (!isSuperuser(session)) throw httpError(403, "Forbidden");
+  if (!canManageStaffUsers(session)) throw httpError(403, "Forbidden");
   await ensureCredentials(env);
   const b = await request.json();
   const username = String(b.username || "").trim();
@@ -785,6 +791,32 @@ async function adminSetUserPassword(request, session, env) {
     .bind(await hashPassword(newPassword), username).run();
   await writeActivity(env, session, "password_reset", `Password reset for ${username}`, { username });
   return json({ status: "ok", message: "User password updated" });
+}
+
+async function adminCreateStaffUser(request, session, env) {
+  if (!canManageStaffUsers(session)) throw httpError(403, "Forbidden");
+  await ensureCredentials(env);
+  const b = await request.json().catch(() => ({}));
+  const username = String(b.username || "").trim().toLowerCase();
+  const newPassword = String(b.new_password || "").trim();
+  const displayName = String(b.display_name || "").trim();
+  if (!username || !newPassword) throw httpError(400, "username and new_password are required");
+  if (newPassword.length < 6) throw httpError(400, "New password must be at least 6 characters");
+  if (!/^[a-z][a-z0-9_]{2,30}$/.test(username)) {
+    throw httpError(400, "Username must start with a letter and contain only lowercase letters, numbers, or underscores");
+  }
+  if (username === "superuser" || /^aai/i.test(username)) throw httpError(400, "Reserved username");
+  const existing = await env.DB.prepare("SELECT username FROM credentials WHERE username = ?").bind(username).first();
+  if (existing) throw httpError(409, "Username already exists");
+  await env.DB.prepare(
+    "INSERT INTO credentials (username, password, role) VALUES (?, ?, 'staff')"
+  ).bind(username, await hashPassword(newPassword)).run();
+  const resolvedName = displayName || username.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+  await writeActivity(env, session, "staff_user_created", `Created staff user ${username}`, {
+    username,
+    display_name: resolvedName,
+  });
+  return json({ status: "ok", username, display_name: resolvedName, message: "Staff user created" });
 }
 
 async function publicStudentIds(env) {
@@ -867,10 +899,12 @@ async function ensureAdmissionsTable(env) {
     last_name: "TEXT",
     phone: "TEXT",
     email: "TEXT",
-    blood_group: "TEXT",
-    age: "INTEGER",
-    dob: "TEXT",
-    aadhaar_number: "TEXT",
+      blood_group: "TEXT",
+      age: "INTEGER",
+      dob: "TEXT",
+      height_cm: "REAL",
+      weight_kg: "REAL",
+      aadhaar_number: "TEXT",
     nationality: "TEXT",
     father_name: "TEXT",
     father_phone: "TEXT",
@@ -1005,10 +1039,12 @@ async function admissionsApply(request, env) {
   const fullName = [firstName, middleName, lastName].filter(Boolean).join(" ").trim();
   const phone = String(b.phone || "").trim();
   const email = String(b.email || "").trim();
-  const bloodGroup = String(b.blood_group || "").trim();
-  const age = Number(b.age || 0);
-  const dob = String(b.dob || "").trim();
-  const aadhaarNumber = String(b.aadhaar_number || "").trim();
+    const bloodGroup = String(b.blood_group || "").trim();
+    const age = Number(b.age || 0);
+    const dob = String(b.dob || "").trim();
+    const heightCm = Number(b.height_cm || 0);
+    const weightKg = Number(b.weight_kg || 0);
+    const aadhaarNumber = String(b.aadhaar_number || "").trim();
   const nationality = String(b.nationality || "").trim();
   const fatherName = String(b.father_name || "").trim();
   const fatherPhone = String(b.father_phone || "").trim();
@@ -1056,18 +1092,18 @@ async function admissionsApply(request, env) {
   const academicDetailsJson = JSON.stringify(academicDetails);
   if (!firstName || !lastName || !phone || !email || !course) throw httpError(400, "Missing required fields");
   const ins = await env.DB.prepare(
-    `INSERT INTO admissions (
-      full_name,
-      first_name, middle_name, last_name, phone, email, blood_group, age, dob, aadhaar_number, nationality,
-      father_name, father_phone, father_occupation, father_email, mother_name, mother_phone, mother_occupation, mother_email,
-      correspondence_address, permanent_address, course, academic_details_json, admission_pdf_r2_key, admission_pdf_bytes,
-      admission_photo_r2_key, admission_photo_bytes, admission_photo_type
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(
-    fullName,
-    firstName, middleName, lastName, phone, email, bloodGroup, age, dob, aadhaarNumber, nationality,
-    fatherName, fatherPhone, fatherOccupation, fatherEmail, motherName, motherPhone, motherOccupation, motherEmail,
-    correspondenceAddress, permanentAddress, course, academicDetailsJson,
+      `INSERT INTO admissions (
+        full_name,
+        first_name, middle_name, last_name, phone, email, blood_group, age, dob, height_cm, weight_kg, aadhaar_number, nationality,
+        father_name, father_phone, father_occupation, father_email, mother_name, mother_phone, mother_occupation, mother_email,
+        correspondence_address, permanent_address, course, academic_details_json, admission_pdf_r2_key, admission_pdf_bytes,
+        admission_photo_r2_key, admission_photo_bytes, admission_photo_type
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      fullName,
+      firstName, middleName, lastName, phone, email, bloodGroup, age, dob, heightCm, weightKg, aadhaarNumber, nationality,
+      fatherName, fatherPhone, fatherOccupation, fatherEmail, motherName, motherPhone, motherOccupation, motherEmail,
+      correspondenceAddress, permanentAddress, course, academicDetailsJson,
     storedPdf.key,
     Number(admissionPdfBytes.length || 0),
     storedPhoto.key,
@@ -1309,10 +1345,11 @@ async function studentFinancials(env, studentId) {
     "SELECT COALESCE(SUM(amount_paid),0) AS paid, COALESCE(MAX(amount_total),0) AS max_total, COUNT(*) AS transactions FROM fees WHERE student_id = ?"
   ).bind(studentId).first();
   const policy = await env.DB.prepare(
-    "SELECT concession_amount, due_date FROM fee_policies WHERE student_id = ?"
+    "SELECT concession_amount, custom_total_amount, due_date FROM fee_policies WHERE student_id = ?"
   ).bind(studentId).first();
   const planned = await courseFeeInr(env, student.course);
-  const baseTotal = Number(planned ?? fee.max_total ?? 0);
+  const customTotalAmount = Number(policy?.custom_total_amount || 0);
+  const baseTotal = customTotalAmount > 0 ? customTotalAmount : Number(planned ?? fee.max_total ?? 0);
   const concessionAmount = Math.min(Math.max(Number(policy?.concession_amount || 0), 0), Math.max(baseTotal, 0));
   const total = Math.max(baseTotal - concessionAmount, 0);
   const paid = Number(fee.paid || 0);
@@ -1320,7 +1357,9 @@ async function studentFinancials(env, studentId) {
   return {
     student,
     base_total: baseTotal,
+    custom_total_amount: customTotalAmount > 0 ? customTotalAmount : null,
     concession_amount: concessionAmount,
+    discount_amount: concessionAmount,
     due_date: policy?.due_date || null,
     total,
     paid,
@@ -1334,10 +1373,16 @@ async function ensureFeePoliciesTable(env) {
     `CREATE TABLE IF NOT EXISTS fee_policies (
       student_id TEXT PRIMARY KEY,
       concession_amount REAL NOT NULL DEFAULT 0,
+      custom_total_amount REAL,
       due_date TEXT,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`
   ).run();
+  const cols = await env.DB.prepare("PRAGMA table_info(fee_policies)").all();
+  const existing = new Set((cols.results || []).map((c) => c.name));
+  if (!existing.has("custom_total_amount")) {
+    await env.DB.prepare("ALTER TABLE fee_policies ADD COLUMN custom_total_amount REAL").run();
+  }
 }
 
 async function ensureTrainingCategoriesTable(env) {
@@ -1874,14 +1919,16 @@ async function listStudents(session, env) {
       withFinancials.push(row);
       continue;
     }
-    withFinancials.push({
-      ...row,
-      fee_total: info.total,
-      fee_paid: info.paid,
-      fee_due: info.due,
-      fee_concession: info.concession_amount,
-      fee_due_date: info.due_date,
-    });
+      withFinancials.push({
+        ...row,
+        fee_total: info.total,
+        fee_paid: info.paid,
+        fee_due: info.due,
+        fee_concession: info.concession_amount,
+        fee_discount: info.concession_amount,
+        fee_due_date: info.due_date,
+        custom_total_amount: info.custom_total_amount,
+      });
   }
   return json(withFinancials);
 }
@@ -1891,21 +1938,35 @@ async function addStudent(url, session, env) {
   const studentName = url.searchParams.get("student_name") || "";
   const course = url.searchParams.get("course") || "";
   const batch = url.searchParams.get("batch") || "";
+  const customTotalRaw = url.searchParams.get("custom_total_amount");
+  const customTotalAmount = customTotalRaw === null || customTotalRaw === ""
+    ? null
+    : Math.max(Number(customTotalRaw || 0), 0);
   if (!studentName || !course || !batch) throw httpError(400, "Missing required fields");
   const sid = "AAI" + Math.floor(100 + Math.random() * 900);
   await env.DB.prepare(
     "INSERT INTO students (student_id, student_name, course, batch) VALUES (?, ?, ?, ?)"
   ).bind(sid, studentName, course, batch).run();
+  await ensureFeePoliciesTable(env);
+  if (customTotalAmount && customTotalAmount > 0) {
+    await env.DB.prepare(
+      `INSERT INTO fee_policies (student_id, concession_amount, custom_total_amount, due_date, updated_at)
+       VALUES (?, 0, ?, NULL, datetime('now'))
+       ON CONFLICT(student_id) DO UPDATE SET
+         custom_total_amount = excluded.custom_total_amount,
+         updated_at = datetime('now')`
+    ).bind(sid, customTotalAmount).run();
+  }
   await writeActivity(
     env,
     session,
     "student_added",
-    `Student added: ${studentName} (${sid})`,
-    { student_id: sid, student_name: studentName, course, batch }
-  );
-  await ensureCredentials(env);
-  return json({ status: "ok", message: "Student added", student_id: sid });
-}
+      `Student added: ${studentName} (${sid})`,
+      { student_id: sid, student_name: studentName, course, batch, custom_total_amount: customTotalAmount }
+    );
+    await ensureCredentials(env);
+    return json({ status: "ok", message: "Student added", student_id: sid, custom_total_amount: customTotalAmount });
+  }
 
 function normalizeStudentIds(rawIds) {
   if (!Array.isArray(rawIds)) return [];
@@ -2669,7 +2730,7 @@ async function feesPoliciesList(session, env) {
   if (!isSuperuser(session)) throw httpError(403, "Forbidden");
   await ensureFeePoliciesTable(env);
   const rows = await env.DB.prepare(
-    "SELECT student_id, concession_amount, due_date, updated_at FROM fee_policies ORDER BY student_id ASC"
+    "SELECT student_id, concession_amount, custom_total_amount, due_date, updated_at FROM fee_policies ORDER BY student_id ASC"
   ).all();
   return json(rows.results || []);
 }
@@ -2724,30 +2785,39 @@ async function feesPolicyUpsert(request, session, env) {
   const rawDiscount = b.discount_amount ?? b.concession_amount ?? 0;
   let concessionAmount = Math.max(Number(rawDiscount || 0), 0);
   concessionAmount = Math.min(concessionAmount, Math.max(Number(infoBefore.base_total || 0), 0));
+  let customTotalAmount = b.custom_total_amount;
+  if (customTotalAmount !== null && customTotalAmount !== undefined && customTotalAmount !== "") {
+    customTotalAmount = Math.max(Number(customTotalAmount || 0), 0);
+  } else {
+    customTotalAmount = null;
+  }
+  if (customTotalAmount !== null && customTotalAmount <= 0) customTotalAmount = null;
   let dueDate = String(b.due_date || "").trim();
   if (dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) throw httpError(400, "due_date must be YYYY-MM-DD");
   if (!dueDate) dueDate = null;
   await env.DB.prepare(
-    `INSERT INTO fee_policies (student_id, concession_amount, due_date, updated_at)
-     VALUES (?, ?, ?, datetime('now'))
+    `INSERT INTO fee_policies (student_id, concession_amount, custom_total_amount, due_date, updated_at)
+     VALUES (?, ?, ?, ?, datetime('now'))
      ON CONFLICT(student_id) DO UPDATE SET
        concession_amount = excluded.concession_amount,
+       custom_total_amount = excluded.custom_total_amount,
        due_date = excluded.due_date,
        updated_at = datetime('now')`
-  ).bind(studentId, concessionAmount, dueDate).run();
+  ).bind(studentId, concessionAmount, customTotalAmount, dueDate).run();
   const infoAfter = await studentFinancials(env, studentId);
   await writeActivity(
     env,
     session,
     "fee_policy_updated",
     `Updated fee policy for ${studentId}`,
-    { student_id: studentId, concession_amount: concessionAmount, discount_amount: concessionAmount, due_date: dueDate }
+    { student_id: studentId, concession_amount: concessionAmount, discount_amount: concessionAmount, custom_total_amount: customTotalAmount, due_date: dueDate }
   );
   return json({
     status: "ok",
     student_id: studentId,
     concession_amount: infoAfter?.concession_amount || 0,
     discount_amount: infoAfter?.concession_amount || 0,
+    custom_total_amount: infoAfter?.custom_total_amount || null,
     due_date: infoAfter?.due_date || null,
     total: infoAfter?.total || 0,
     due: infoAfter?.due || 0,
@@ -2763,19 +2833,20 @@ async function feesResetUnpaid(session, env) {
   ).all();
   const maxByStudent = new Map((feeMax.results || []).map((r) => [String(r.student_id), Number(r.max_total || 0)]));
   const policies = await env.DB.prepare(
-    "SELECT student_id, concession_amount, due_date FROM fee_policies"
+    "SELECT student_id, concession_amount, custom_total_amount, due_date FROM fee_policies"
   ).all();
   const policyByStudent = new Map((policies.results || []).map((r) => [String(r.student_id), r]));
 
   await env.DB.prepare("DELETE FROM fees").run();
 
-  let inserted = 0;
-  for (const s of students.results || []) {
-    const sid = String(s.student_id || "");
-    const planned = await courseFeeInr(env, s.course);
-    const baseTotal = Number(planned ?? maxByStudent.get(sid) ?? 0);
-    const policy = policyByStudent.get(sid);
-    const concession = Math.min(Math.max(Number(policy?.concession_amount || 0), 0), Math.max(baseTotal, 0));
+    let inserted = 0;
+    for (const s of students.results || []) {
+      const sid = String(s.student_id || "");
+      const planned = await courseFeeInr(env, s.course);
+      const policy = policyByStudent.get(sid);
+      const customTotal = Number(policy?.custom_total_amount || 0);
+      const baseTotal = customTotal > 0 ? customTotal : Number(planned ?? maxByStudent.get(sid) ?? 0);
+      const concession = Math.min(Math.max(Number(policy?.concession_amount || 0), 0), Math.max(baseTotal, 0));
     const effectiveTotal = Math.max(baseTotal - concession, 0);
     const dueDate = policy?.due_date || null;
     await env.DB.prepare(

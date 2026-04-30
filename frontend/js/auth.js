@@ -5,6 +5,11 @@ import { applyRoleUI, afterLoginInit, setSidebarOpen } from "./ui.js";
 
 let loginInFlight = false;
 
+function canManageStaffUsersClient() {
+  const user = String(state.authInfo?.user || "").toLowerCase();
+  return user === "superuser" || user === "nanda";
+}
+
 export async function initAuth() {
   if (state.parentMode) return;
   const token = localStorage.getItem(TOKEN_KEY);
@@ -186,7 +191,7 @@ export async function changeOwnPassword() {
 }
 
 export async function adminSetUserPassword() {
-  if (!state.authInfo || state.authInfo.role !== "superuser") return;
+  if (!canManageStaffUsersClient()) return;
   const userEl = document.getElementById("adminPasswordUsername");
   const passEl = document.getElementById("adminPasswordNew");
   const username = String(userEl?.value || "").trim();
@@ -208,4 +213,32 @@ export async function adminSetUserPassword() {
   if (userEl) userEl.value = "";
   if (passEl) passEl.value = "";
   alert("User password updated.");
+}
+
+export async function createStaffUser() {
+  if (!canManageStaffUsersClient()) return;
+  const userEl = document.getElementById("staffCreateUsername");
+  const displayEl = document.getElementById("staffCreateDisplayName");
+  const passEl = document.getElementById("staffCreatePassword");
+  const username = String(userEl?.value || "").trim();
+  const displayName = String(displayEl?.value || "").trim();
+  const newPassword = String(passEl?.value || "").trim();
+  if (!username || !newPassword) {
+    alert("Enter username and password for the new staff user.");
+    return;
+  }
+  const res = await authFetch(`${API}/admin/staff-users`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, display_name: displayName, new_password: newPassword }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "Failed to create staff user.");
+    return;
+  }
+  if (userEl) userEl.value = "";
+  if (displayEl) displayEl.value = "";
+  if (passEl) passEl.value = "";
+  alert("Staff user created.");
 }

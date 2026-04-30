@@ -114,14 +114,16 @@ export function renderFeesEntryList() {
   body.innerHTML = "";
 
   if (!state.allStudents.length) {
-    body.innerHTML = `<tr><td colspan="15" class="empty">No students found</td></tr>`;
+    body.innerHTML = `<tr><td colspan="16" class="empty">No students found</td></tr>`;
     return;
   }
 
   state.allStudents.forEach(s => {
     const policy = state.feePoliciesByStudent[String(s.student_id)] || {};
     const totalAmount = getTrainingCategoryFee(s.course, s);
-    const totalDisplay = `INR ${formatMoney(totalAmount)}`;
+    const customTotalAmount = Number(policy.custom_total_amount || s.custom_total_amount || 0);
+    const effectiveBaseTotal = customTotalAmount > 0 ? customTotalAmount : totalAmount;
+    const totalDisplay = `INR ${formatMoney(effectiveBaseTotal)}`;
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${s.student_name} (ID: ${s.student_id})</td>
@@ -129,7 +131,7 @@ export function renderFeesEntryList() {
       <td>${s.batch}</td>
       <td>
         <span class="fee-total-label">${totalDisplay}</span>
-        <input class="fee-input" id="fee-total-${s.student_id}" type="number" min="0" step="0.01" value="${totalAmount}" hidden />
+        <input class="fee-input" id="fee-total-${s.student_id}" type="number" min="0" step="0.01" value="${effectiveBaseTotal}" hidden />
       </td>
       <td><input class="fee-input" id="fee-paid-${s.student_id}" type="number" min="0" step="0.01" placeholder="Paid" /></td>
       <td><input id="fee-receipt-${s.student_id}" type="file" /></td>
@@ -145,6 +147,7 @@ export function renderFeesEntryList() {
       <td><input class="fee-input" id="fee-utr-${s.student_id}" placeholder="Txn / UTR" /></td>
       <td><input class="fee-input" id="fee-bankref-${s.student_id}" placeholder="Bank Ref" /></td>
       <td><input class="fee-input" id="fee-txtype-${s.student_id}" placeholder="Txn Type" /></td>
+      <td><input class="fee-input" id="fee-custom-total-${s.student_id}" type="number" min="0" step="0.01" placeholder="Course default" value="${customTotalAmount > 0 ? customTotalAmount : ""}" /></td>
       <td><input class="fee-input" id="fee-concession-${s.student_id}" type="number" min="0" step="0.01" placeholder="Discount" value="${Number(policy.concession_amount || policy.discount_amount || 0)}" /></td>
       <td><input id="fee-deadline-${s.student_id}" type="date" value="${policy.due_date || ""}" /></td>
       <td>
@@ -226,9 +229,12 @@ export async function recordFee(studentId, generateInvoice = false) {
 }
 
 export async function saveFeePolicy(studentId) {
+  const customTotalEl = document.getElementById(`fee-custom-total-${studentId}`);
   const concessionEl = document.getElementById(`fee-concession-${studentId}`);
   const deadlineEl = document.getElementById(`fee-deadline-${studentId}`);
   const concession = Math.max(Number(concessionEl?.value || 0), 0);
+  const customTotalRaw = String(customTotalEl?.value || "").trim();
+  const customTotalAmount = customTotalRaw ? Math.max(Number(customTotalRaw || 0), 0) : null;
   const dueDate = String(deadlineEl?.value || "").trim();
 
   const res = await authFetch(`${API}/fees/admin/policy`, {
@@ -238,6 +244,7 @@ export async function saveFeePolicy(studentId) {
       student_id: String(studentId),
       concession_amount: concession,
       discount_amount: concession,
+      custom_total_amount: customTotalAmount,
       due_date: dueDate || null,
     }),
   });
@@ -250,10 +257,16 @@ export async function saveFeePolicy(studentId) {
   state.feePoliciesByStudent[String(studentId)] = {
     concession_amount: Number(data.concession_amount || data.discount_amount || concession),
     discount_amount: Number(data.discount_amount || data.concession_amount || concession),
+    custom_total_amount: data.custom_total_amount ?? customTotalAmount,
     due_date: data.due_date || dueDate || "",
   };
-  await Promise.all([loadFeeSummary(), window.loadStudentFeeSummary ? window.loadStudentFeeSummary() : null]);
-  alert("Fee discount/deadline updated.");
+  await Promise.all([
+    loadFeeSummary(),
+    window.loadStudentFeeSummary ? window.loadStudentFeeSummary() : null,
+    window.loadStudents ? window.loadStudents() : null,
+  ]);
+  renderFeesEntryList();
+  alert("Fee total/discount/deadline updated.");
 }
 
 export async function resetFeesToUnpaid() {
@@ -287,6 +300,9 @@ export async function loadFeePolicies() {
     map[sid] = {
       concession_amount: Number(r.concession_amount || r.discount_amount || 0),
       discount_amount: Number(r.discount_amount || r.concession_amount || 0),
+      custom_total_amount: r.custom_total_amount !== null && r.custom_total_amount !== undefined
+        ? Number(r.custom_total_amount || 0)
+        : null,
       due_date: r.due_date || "",
     };
   });
@@ -543,7 +559,7 @@ export function exportFeesCsv() {
     alert("No fee data to export.");
     return;
   }
-  const headers = ["Student", "Course", "Batch", "Total Fee", "Paid", "Remarks", "Discount", "Deadline"];
+  const headers = ["Student", "Course", "Batch", "Total Fee", "Paid", "Remarks", "Custom Total Fee", "Discount", "Deadline"];
   const data = rows.map((row) => {
     const cells = Array.from(row.children);
     const student = String(cells[0]?.textContent || "").trim();
@@ -552,9 +568,10 @@ export function exportFeesCsv() {
     const total = String(cells[3]?.querySelector("input")?.value || "").trim();
     const paid = String(cells[4]?.querySelector("input")?.value || "").trim();
     const remarks = String(cells[6]?.querySelector("input")?.value || "").trim();
-    const concession = String(cells[12]?.querySelector("input")?.value || "").trim();
-    const deadline = String(cells[13]?.querySelector("input")?.value || "").trim();
-    return [student, course, batch, total, paid, remarks, concession, deadline];
+    const customTotal = String(cells[12]?.querySelector("input")?.value || "").trim();
+    const concession = String(cells[13]?.querySelector("input")?.value || "").trim();
+    const deadline = String(cells[14]?.querySelector("input")?.value || "").trim();
+    return [student, course, batch, total, paid, remarks, customTotal, concession, deadline];
   });
   downloadCsv(headers, data, `fees_${getTodayIso()}.csv`);
 }

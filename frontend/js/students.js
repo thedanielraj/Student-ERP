@@ -169,20 +169,30 @@ export async function addStudent() {
   const name = document.getElementById("name").value.trim();
   const course = document.getElementById("course").value.trim();
   const batch = document.getElementById("batch").value.trim();
+  const customFeeValue = document.getElementById("studentCustomFee").value.trim();
 
   if (!name || !course || !batch) {
     alert("Fill all fields.");
     return;
   }
 
-  const url = `${API}/students?student_name=${encodeURIComponent(name)}&course=${encodeURIComponent(course)}&batch=${encodeURIComponent(batch)}`;
-  await authFetch(url, { method: "POST" });
+  const customFee = customFeeValue ? Math.max(Number(customFeeValue || 0), 0) : null;
+  const feeParam = customFee !== null && Number.isFinite(customFee)
+    ? `&custom_total_amount=${encodeURIComponent(String(customFee))}`
+    : "";
+  const url = `${API}/students?student_name=${encodeURIComponent(name)}&course=${encodeURIComponent(course)}&batch=${encodeURIComponent(batch)}${feeParam}`;
+  const res = await authFetch(url, { method: "POST", autoHandleError: true, errorMessage: "Failed to add student." });
+  if (!res.ok) return;
 
   document.getElementById("name").value = "";
   document.getElementById("course").value = "";
   document.getElementById("batch").value = "";
+  document.getElementById("studentCustomFee").value = "";
 
-  loadStudents();
+  await Promise.all([
+    loadStudents(),
+    window.refreshFeesDashboard ? window.refreshFeesDashboard() : null,
+  ]);
 }
 
 export async function bulkMoveBatch() {
